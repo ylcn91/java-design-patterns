@@ -20,7 +20,7 @@ public abstract class AbstractRateLimitAlgorithm implements RateLimitAlgorithm {
   protected final RateLimitCircuitBreaker circuitBreaker;
   private final ConcurrentMap<String, ClientData> clientDataMap = new ConcurrentHashMap<>();
 
-  protected static class ClientData {
+  public static class ClientData {
     final StampedLock lock = new StampedLock();
     final AtomicLong lastAccessTime = new AtomicLong(System.currentTimeMillis());
   }

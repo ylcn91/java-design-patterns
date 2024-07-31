@@ -1,11 +1,13 @@
-package com.iluwatar.ratelimiter.infrastructure;
+package com.iluwatar.ratelimiter.infrastructure.algorithms;
 
 import com.iluwatar.ratelimiter.domain.RateLimit;
 import com.iluwatar.ratelimiter.domain.RateLimitResult;
+import com.iluwatar.ratelimiter.infrastructure.AbstractRateLimitAlgorithm;
+import com.iluwatar.ratelimiter.infrastructure.RateLimitCircuitBreaker;
+import com.iluwatar.ratelimiter.infrastructure.RateLimitConfig;
 import com.iluwatar.ratelimiter.infrastructure.datastructures.LockFreeLeakyBucket;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -21,7 +23,8 @@ public class LeakyBucketRateLimiter extends AbstractRateLimitAlgorithm {
   private final int bucketCapacity;
 
   // TODO: fix the constructor to use the RateLimitConfig and RateLimitCircuitBreaker
-  public LeakyBucketRateLimiter(@NonNull RateLimitConfig config, @NonNull RateLimitCircuitBreaker circuitBreaker) {
+  public LeakyBucketRateLimiter(@NonNull RateLimitConfig config, @NonNull
+  RateLimitCircuitBreaker circuitBreaker) {
     super(config.getSlidingWindowSize(), config.getBucketCapacity(), config.getRefillRate(), circuitBreaker);
     this.bucketCapacity = (int) config.getBucketCapacity();
     LOGGER.info("LeakyBucketRateLimiter initialized with timeWindowInMillis: {} and bucketCapacity: {}",
