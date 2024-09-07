@@ -6,8 +6,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
 @Slf4j
+@Component
 public class RateLimitCircuitBreaker {
 
   private final AtomicInteger failureCount = new AtomicInteger(0);
@@ -21,6 +23,13 @@ public class RateLimitCircuitBreaker {
   volatile Duration resetTimeout;
 
   volatile Instant lastOpenTime;
+
+
+  public RateLimitCircuitBreaker() {
+    this.failureThreshold = 10; // default failure threshold
+    this.resetTimeout = Duration.ofMinutes(5); // default reset timeout
+  }
+
 
   public RateLimitCircuitBreaker(int failureThreshold, Duration resetTimeout) {
     this.failureThreshold = failureThreshold;
