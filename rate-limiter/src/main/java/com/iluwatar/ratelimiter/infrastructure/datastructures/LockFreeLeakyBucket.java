@@ -9,7 +9,6 @@ import java.util.concurrent.atomic.AtomicReference;
 
 @RequiredArgsConstructor
 public class LockFreeLeakyBucket {
-
   private final AtomicInteger waterLevel = new AtomicInteger(0);
   private final AtomicReference<Instant> lastDripTime = new AtomicReference<>(Instant.now());
   @Getter

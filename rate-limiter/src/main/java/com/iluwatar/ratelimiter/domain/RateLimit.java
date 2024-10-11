@@ -11,7 +11,6 @@ public record RateLimit(
     @Min(0) int requestCount,
     @Min(0) int quotaUsed) {
 
-  //generate a new RateLimit object with the same client, policy, lastResetTime, and requestCount, but with quotaUsed set to 0
   public RateLimit resetRequestCount() {
     return new RateLimit(client, policy, Instant.now(), 0, quotaUsed);
   }
@@ -20,12 +19,11 @@ public record RateLimit(
     return new RateLimit(client, policy, lastResetTime, requestCount + 1, quotaUsed);
   }
 
-  public RateLimit incrementQuotaUsed() {
+  public RateLimit incrementQuotaUsed() { // New method to increment quotaUsed
     return new RateLimit(client, policy, lastResetTime, requestCount, quotaUsed + 1);
   }
 
-  // this method will be used for QuataLimiter
-  public RateLimit resetQuotaUsed() {
+  public RateLimit resetQuotaUsed() { // New method to reset quotaUsed
     return new RateLimit(client, policy, lastResetTime, requestCount, 0);
   }
 }

@@ -2,9 +2,8 @@ package com.iluwatar.ratelimiter.infrastructure.algorithms;
 
 import com.iluwatar.ratelimiter.domain.RateLimit;
 import com.iluwatar.ratelimiter.domain.RateLimitResult;
-import com.iluwatar.ratelimiter.infrastructure.AbstractRateLimitAlgorithm;
 import com.iluwatar.ratelimiter.infrastructure.RateLimitCircuitBreaker;
-import com.iluwatar.ratelimiter.infrastructure.RateLimitConfig;
+import com.iluwatar.ratelimiter.infrastructure.configs.ratelimit.RateLimitConfig;
 import com.iluwatar.ratelimiter.infrastructure.datastructures.LockFreeTokenBucket;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;

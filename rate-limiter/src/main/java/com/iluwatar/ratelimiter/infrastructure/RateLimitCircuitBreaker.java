@@ -6,10 +6,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
 
 @Slf4j
-@Component
 public class RateLimitCircuitBreaker {
 
   private final AtomicInteger failureCount = new AtomicInteger(0);
@@ -24,20 +22,13 @@ public class RateLimitCircuitBreaker {
 
   volatile Instant lastOpenTime;
 
-
-  public RateLimitCircuitBreaker() {
-    this.failureThreshold = 10; // default failure threshold
-    this.resetTimeout = Duration.ofMinutes(5); // default reset timeout
-  }
-
-
   public RateLimitCircuitBreaker(int failureThreshold, Duration resetTimeout) {
     this.failureThreshold = failureThreshold;
     this.resetTimeout = resetTimeout;
   }
 
   public synchronized void reset() {
-    LOGGER.info("Resetting circuit breaker state");
+    log.info("Resetting circuit breaker state");
     failureCount.set(0);
     isOpen.set(false);
     isHalfOpen.set(false);
@@ -47,13 +38,13 @@ public class RateLimitCircuitBreaker {
   public synchronized boolean isCircuitClosed() {
     if (isOpen.get()) {
       if (isHalfOpen.get()) {
-        LOGGER.debug("Circuit is in half-open state");
+        log.debug("Circuit is in half-open state");
         return true;
       }
 
-      LOGGER.info("Circuit is open");
+      log.info("Circuit is open");
       if (Duration.between(lastOpenTime, Instant.now()).compareTo(resetTimeout) > 0) {
-        LOGGER.info("Transitioning to half-open state");
+        log.info("Transitioning to half-open state");
         isHalfOpen.set(true);
         isOpen.set(false);
         return true;
@@ -62,7 +53,7 @@ public class RateLimitCircuitBreaker {
     }
 
     if (failureCount.get() >= failureThreshold) {
-      LOGGER.info("Opening circuit");
+      log.info("Opening circuit");
       isOpen.set(true);
       lastOpenTime = Instant.now();
       return false;
@@ -72,7 +63,7 @@ public class RateLimitCircuitBreaker {
 
   public synchronized void recordFailure() {
     if (isHalfOpen.get()) {
-      LOGGER.info("Recording failure in half-open state, opening circuit");
+      log.info("Recording failure in half-open state, opening circuit");
       isHalfOpen.set(false);
       isOpen.set(true);
       lastOpenTime = Instant.now();
@@ -85,14 +76,14 @@ public class RateLimitCircuitBreaker {
 
   public synchronized void recordSuccess() {
     if (isHalfOpen.get()) {
-      LOGGER.info("Recording success in half-open state, closing circuit");
+      log.info("Recording success in half-open state, closing circuit");
       isHalfOpen.set(false);
       isOpen.set(false);
       failureCount.set(0);
     } else {
-      LOGGER.info("Recording success");
+      log.info("Recording success");
       failureCount.set(0);
-      LOGGER.info("Failure count reset to 0");
+      log.info("Failure count reset to 0");
     }
   }
 }
