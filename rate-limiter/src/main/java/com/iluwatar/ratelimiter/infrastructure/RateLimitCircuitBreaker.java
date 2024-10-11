@@ -28,7 +28,7 @@ public class RateLimitCircuitBreaker {
   }
 
   public synchronized void reset() {
-    log.info("Resetting circuit breaker state");
+    LOGGER.info("Resetting circuit breaker state");
     failureCount.set(0);
     isOpen.set(false);
     isHalfOpen.set(false);
@@ -38,13 +38,13 @@ public class RateLimitCircuitBreaker {
   public synchronized boolean isCircuitClosed() {
     if (isOpen.get()) {
       if (isHalfOpen.get()) {
-        log.debug("Circuit is in half-open state");
+        LOGGER.debug("Circuit is in half-open state");
         return true;
       }
 
-      log.info("Circuit is open");
+      LOGGER.info("Circuit is open");
       if (Duration.between(lastOpenTime, Instant.now()).compareTo(resetTimeout) > 0) {
-        log.info("Transitioning to half-open state");
+        LOGGER.info("Transitioning to half-open state");
         isHalfOpen.set(true);
         isOpen.set(false);
         return true;
@@ -53,7 +53,7 @@ public class RateLimitCircuitBreaker {
     }
 
     if (failureCount.get() >= failureThreshold) {
-      log.info("Opening circuit");
+      LOGGER.info("Opening circuit");
       isOpen.set(true);
       lastOpenTime = Instant.now();
       return false;
@@ -63,7 +63,7 @@ public class RateLimitCircuitBreaker {
 
   public synchronized void recordFailure() {
     if (isHalfOpen.get()) {
-      log.info("Recording failure in half-open state, opening circuit");
+      LOGGER.info("Recording failure in half-open state, opening circuit");
       isHalfOpen.set(false);
       isOpen.set(true);
       lastOpenTime = Instant.now();
@@ -76,14 +76,14 @@ public class RateLimitCircuitBreaker {
 
   public synchronized void recordSuccess() {
     if (isHalfOpen.get()) {
-      log.info("Recording success in half-open state, closing circuit");
+      LOGGER.info("Recording success in half-open state, closing circuit");
       isHalfOpen.set(false);
       isOpen.set(false);
       failureCount.set(0);
     } else {
-      log.info("Recording success");
+      LOGGER.info("Recording success");
       failureCount.set(0);
-      log.info("Failure count reset to 0");
+      LOGGER.info("Failure count reset to 0");
     }
   }
 }
