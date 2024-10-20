@@ -11,7 +11,7 @@ public class RejectThrottlingStrategy implements ThrottlingStrategy {
   public void throttle(RateLimitResult result) {
     if (!result.allowed()) {
       LOGGER.info("Rate limit exceeded. Rejecting request.");
-      throw new RuntimeException("Rate limit exceeded. Please try again after " + result.retryAfter().toMillis() + " milliseconds.");
+    //  throw new RuntimeException("Rate limit exceeded. Please try again after " + result.retryAfter().toMillis() + " milliseconds.");
     }
   }
 }

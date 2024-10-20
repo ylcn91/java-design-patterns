@@ -19,11 +19,11 @@ public record RateLimit(
     return new RateLimit(client, policy, lastResetTime, requestCount + 1, quotaUsed);
   }
 
-  public RateLimit incrementQuotaUsed() { // New method to increment quotaUsed
+  public RateLimit incrementQuotaUsed() {
     return new RateLimit(client, policy, lastResetTime, requestCount, quotaUsed + 1);
   }
 
-  public RateLimit resetQuotaUsed() { // New method to reset quotaUsed
+  public RateLimit resetQuotaUsed() {
     return new RateLimit(client, policy, lastResetTime, requestCount, 0);
   }
 }
