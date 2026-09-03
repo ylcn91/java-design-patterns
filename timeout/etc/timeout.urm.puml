@@ -1,0 +1,65 @@
+@startuml
+package com.iluwatar.timeout {
+  class TimeoutPolicy {
+    - serviceName : String
+    - timeout : Duration
+    + TimeoutPolicy(serviceName : String, timeout : Duration)
+    + of(serviceName : String, millis : long) : TimeoutPolicy {static}
+    + serviceName() : String
+    + timeout() : Duration
+  }
+  class TimeoutRegistry {
+    - policies : Map<String, TimeoutPolicy>
+    - defaultTimeout : Duration
+    + TimeoutRegistry(defaultTimeout : Duration)
+    + register(policy : TimeoutPolicy) : TimeoutRegistry
+    + policyFor(serviceName : String) : TimeoutPolicy
+  }
+  class TimeoutMetrics {
+    - timeouts : ConcurrentMap<String, AtomicInteger>
+    + TimeoutMetrics()
+    + recordTimeout(serviceName : String) : void
+    + timeoutCount(serviceName : String) : int
+    + snapshot() : Map<String, Integer>
+  }
+  class TimeoutExecutor {
+    - executor : ExecutorService
+    - metrics : TimeoutMetrics
+    + TimeoutExecutor()
+    + TimeoutExecutor(executor : ExecutorService)
+    + execute(policy : TimeoutPolicy, call : Callable<T>, fallback : Supplier<T>) : T
+    + metrics() : TimeoutMetrics
+    + close() : void
+  }
+  class ServiceCallException {
+    + ServiceCallException(serviceName : String, cause : Throwable)
+  }
+  class ProductCatalogService {
+    + NAME : String {static}
+    - latency : Duration
+    + ProductCatalogService(latency : Duration)
+    + fetchProducts() : List<String>
+  }
+  class RecommendationService {
+    + NAME : String {static}
+    - latency : Duration
+    + RecommendationService(latency : Duration)
+    + recommendationsFor(customer : String) : List<String>
+  }
+  class App {
+    - POPULAR_ITEMS : List<String> {static}
+    + App()
+    + main(args : String[]) : void
+    ~ loadProducts(executor : TimeoutExecutor, registry : TimeoutRegistry, catalog : ProductCatalogService) : List<String> {static}
+    ~ loadRecommendations(executor : TimeoutExecutor, registry : TimeoutRegistry, recommendations : RecommendationService, customer : String) : List<String> {static}
+  }
+}
+TimeoutExecutor --> TimeoutMetrics
+TimeoutExecutor ..> TimeoutPolicy
+TimeoutExecutor ..> ServiceCallException
+TimeoutRegistry --> "*" TimeoutPolicy
+App ..> TimeoutRegistry
+App ..> TimeoutExecutor
+App ..> ProductCatalogService
+App ..> RecommendationService
+@enduml
