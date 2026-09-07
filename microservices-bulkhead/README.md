@@ -55,6 +55,8 @@ sequenceDiagram
     IB-->>Caller: response without waiting for payment
 ```
 
+![Bulkhead class diagram](./etc/microservices-bulkhead.urm.png)
+
 ## Programmatic Example of Bulkhead Pattern in Java
 
 Our order service depends on two remote systems. Both implement the same `RemoteService` contract.
@@ -102,7 +104,7 @@ public class InventoryService implements RemoteService {
 }
 ```
 
-The `Bulkhead` is the compartment. It owns a `ThreadPoolExecutor` with a fixed number of worker threads and a bounded queue. The `AbortPolicy` makes the executor throw when both are full, and the bulkhead translates that into a `BulkheadFullException` so the caller fails fast. It also keeps a counter of rejected calls for monitoring.
+The `Bulkhead` is the compartment. It owns a `ThreadPoolExecutor` with a fixed number of worker threads and a bounded queue. The `AbortPolicy` makes the executor throw when both are full, and the bulkhead translates that into a `BulkheadFullException` so the caller fails fast. It also keeps a counter of rejected calls for monitoring, and on shutdown it cancels the futures of the calls that were still queued so their callers are released instead of waiting forever.
 
 ```java
 @Slf4j
@@ -141,6 +143,9 @@ public class Bulkhead implements AutoCloseable {
     try {
       return executor.submit(task);
     } catch (RejectedExecutionException e) {
+      if (executor.isShutdown()) {
+        throw new IllegalStateException("Bulkhead '" + name + "' is shut down");
+      }
       rejectedCalls.incrementAndGet();
       LOGGER.warn(
           "Bulkhead '{}' is full ({} active, {} queued), rejecting call",
@@ -164,7 +169,11 @@ public class Bulkhead implements AutoCloseable {
   }
 
   public void shutdown() {
-    executor.shutdownNow();
+    for (var pending : executor.shutdownNow()) {
+      if (pending instanceof Future<?> future) {
+        future.cancel(false);
+      }
+    }
   }
 
   @Override
@@ -268,10 +277,6 @@ Payment response: Payment approved for order-1
 ...
 Bulkhead 'payment' rejected 6 of 10 calls, bulkhead 'inventory' rejected 0 of 3 calls
 ```
-
-## Class diagram
-
-See [microservices-bulkhead.urm.puml](./etc/microservices-bulkhead.urm.puml) for the PlantUML class diagram.
 
 ## When to Use the Bulkhead Pattern in Java
 

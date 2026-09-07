@@ -113,6 +113,8 @@ public class App {
       LOGGER.error("Inventory check for '{}' failed", request, e);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+      LOGGER.warn(
+          "Inventory check for '{}' was interrupted while waiting for the response", request);
     }
   }
 

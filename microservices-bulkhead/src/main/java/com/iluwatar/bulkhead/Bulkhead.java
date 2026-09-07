@@ -109,6 +109,9 @@ public class Bulkhead implements AutoCloseable {
           executor.getQueue().size());
       return future;
     } catch (RejectedExecutionException e) {
+      if (executor.isShutdown()) {
+        throw new IllegalStateException("Bulkhead '" + name + "' is shut down");
+      }
       rejectedCalls.incrementAndGet();
       LOGGER.warn(
           "Bulkhead '{}' is full ({} active, {} queued), rejecting call",
@@ -134,9 +137,17 @@ public class Bulkhead implements AutoCloseable {
     return rejectedCalls.get();
   }
 
-  /** Stops the compartment, interrupting calls that are still running. */
+  /**
+   * Stops the compartment, interrupting calls that are still running and cancelling the calls that
+   * were still waiting in the queue, so that callers blocked on their future are released instead
+   * of waiting for a result that will never be produced.
+   */
   public void shutdown() {
-    executor.shutdownNow();
+    for (var pending : executor.shutdownNow()) {
+      if (pending instanceof Future<?> future) {
+        future.cancel(false);
+      }
+    }
   }
 
   @Override

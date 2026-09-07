@@ -30,8 +30,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.concurrent.Callable;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
@@ -129,6 +131,23 @@ class BulkheadTest {
     bulkhead.shutdown();
 
     assertThrows(IllegalStateException.class, () -> bulkhead.submit(() -> "late"));
+  }
+
+  @Test
+  void shouldCancelQueuedCallsOnShutdown() throws Exception {
+    var started = new CountDownLatch(1);
+    var gate = new CountDownLatch(1);
+    Future<String> queued;
+    try (var bulkhead = new Bulkhead("payment", 1, 1)) {
+      bulkhead.submit(blockOn(started, gate));
+      assertTrue(started.await(TIMEOUT_SECONDS, TimeUnit.SECONDS));
+      queued = bulkhead.submit(() -> "queued");
+    }
+
+    // Without the cancellation the queued task would simply be dropped and this call would block
+    // until the timeout expires, because nobody ever completes its future.
+    assertTrue(queued.isCancelled());
+    assertThrows(CancellationException.class, () -> queued.get(1, TimeUnit.SECONDS));
   }
 
   @Test

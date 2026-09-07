@@ -29,9 +29,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 class PaymentServiceTest {
+
+  @AfterEach
+  void clearInterruptFlag() {
+    Thread.interrupted();
+  }
 
   @Test
   void shouldApprovePaymentAfterLatency() {
@@ -44,11 +50,9 @@ class PaymentServiceTest {
   void shouldFailAndKeepInterruptFlagWhenInterrupted() {
     var service = new PaymentService(Duration.ofSeconds(10));
     Thread.currentThread().interrupt();
-    try {
-      assertThrows(IllegalStateException.class, () -> service.call("order-1"));
-      assertTrue(Thread.currentThread().isInterrupted());
-    } finally {
-      assertTrue(Thread.interrupted());
-    }
+
+    assertThrows(IllegalStateException.class, () -> service.call("order-1"));
+
+    assertTrue(Thread.currentThread().isInterrupted());
   }
 }
