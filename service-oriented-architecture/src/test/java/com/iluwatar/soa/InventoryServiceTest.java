@@ -69,6 +69,37 @@ class InventoryServiceTest {
   }
 
   @Test
+  void shouldReleaseReservedStock() {
+    reserve("LAPTOP", 2);
+
+    var response = release("LAPTOP", 2);
+
+    assertTrue(response.success());
+    assertEquals(3, response.body());
+    assertEquals(true, check("LAPTOP", 3).body());
+  }
+
+  @Test
+  void shouldRejectReleaseOfUnknownSku() {
+    var response = release("TABLET", 1);
+
+    assertFalse(response.success());
+    assertEquals("Unknown sku: TABLET", response.message());
+  }
+
+  @Test
+  void shouldRejectNonPositiveQuantity() {
+    assertRejected(check("LAPTOP", 0), 0);
+    assertRejected(check("LAPTOP", -5), -5);
+    assertRejected(reserve("LAPTOP", 0), 0);
+    assertRejected(reserve("LAPTOP", -5), -5);
+    assertRejected(release("LAPTOP", 0), 0);
+    assertRejected(release("LAPTOP", -5), -5);
+    assertEquals(true, check("LAPTOP", 3).body());
+    assertEquals(false, check("LAPTOP", 4).body());
+  }
+
+  @Test
   void shouldFailForUnknownOperation() {
     var response = service.handle(new ServiceRequest(InventoryService.NAME, "audit", Map.of()));
 
@@ -86,5 +117,16 @@ class InventoryServiceTest {
     return service.handle(
         new ServiceRequest(
             InventoryService.NAME, "reserve", Map.of("sku", sku, "quantity", quantity)));
+  }
+
+  private ServiceResponse release(String sku, int quantity) {
+    return service.handle(
+        new ServiceRequest(
+            InventoryService.NAME, "release", Map.of("sku", sku, "quantity", quantity)));
+  }
+
+  private static void assertRejected(ServiceResponse response, int quantity) {
+    assertFalse(response.success());
+    assertEquals("Quantity must be positive: " + quantity, response.message());
   }
 }

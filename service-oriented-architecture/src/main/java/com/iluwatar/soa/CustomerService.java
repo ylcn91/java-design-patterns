@@ -45,8 +45,8 @@ public class CustomerService implements Service {
   public CustomerService() {
     this(
         Map.of(
-            "C-1", new Customer("C-1", "Alice Smith", "alice@example.com"),
-            "C-2", new Customer("C-2", "Bob Jones", "bob@example.com")));
+            "C-1", new Customer("C-1", "Alice Smith"),
+            "C-2", new Customer("C-2", "Bob Jones")));
   }
 
   /** Creates the service backed by the given customers. */

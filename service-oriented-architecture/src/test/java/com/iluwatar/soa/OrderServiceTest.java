@@ -28,8 +28,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -59,6 +62,7 @@ class OrderServiceTest {
     assertTrue(response.success());
     var confirmation = (OrderService.OrderConfirmation) response.body();
     assertEquals("ORD-1", confirmation.orderId());
+    assertEquals("C-1", confirmation.customerId());
     assertEquals("Alice Smith", confirmation.customerName());
     assertEquals("LAPTOP", confirmation.sku());
     assertEquals(2, confirmation.quantity());
@@ -105,25 +109,55 @@ class OrderServiceTest {
   }
 
   @Test
+  void shouldReserveBeforeChargingAndReleaseWhenPaymentFails() {
+    var operations = new ArrayList<String>();
+    var recordingBus = busWithRecordingInventory(operations);
+
+    var response = placeOrder(recordingBus, "C-1", "LAPTOP", 2, 1500.0, CREDENTIAL);
+
+    assertFalse(response.success());
+    assertEquals(
+        "Order rejected: Payment of 1500.0 declined for C-1: exceeds credit limit",
+        response.message());
+    assertEquals(List.of("checkStock", "reserve", "release"), operations);
+    assertEquals(true, checkStock("LAPTOP", 2));
+  }
+
+  @Test
   void shouldRejectOrderWhenReservationFails() {
+    var charges = new AtomicInteger();
     var stubBus =
-        busWithInventoryStub(ServiceResponse.ok(true), ServiceResponse.error("reservation failed"));
+        busWithInventoryStub(
+            ServiceResponse.ok(true), ServiceResponse.error("reservation failed"), charges);
 
     var response = placeOrder(stubBus, "C-1", "LAPTOP", 1, 899.0, CREDENTIAL);
 
     assertFalse(response.success());
     assertEquals("Order rejected: reservation failed", response.message());
+    assertEquals(0, charges.get());
   }
 
   @Test
   void shouldRejectOrderWhenStockCheckFails() {
+    var charges = new AtomicInteger();
     var stubBus =
-        busWithInventoryStub(ServiceResponse.error("inventory unavailable"), ServiceResponse.ok(0));
+        busWithInventoryStub(
+            ServiceResponse.error("inventory unavailable"), ServiceResponse.ok(0), charges);
 
     var response = placeOrder(stubBus, "C-1", "LAPTOP", 1, 899.0, CREDENTIAL);
 
     assertFalse(response.success());
-    assertEquals("Order rejected: insufficient stock for LAPTOP", response.message());
+    assertEquals("Order rejected: inventory unavailable", response.message());
+    assertEquals(0, charges.get());
+  }
+
+  @Test
+  void shouldRejectNonPositiveQuantityWithTheInventoryReason() {
+    var response = placeOrder("C-1", "LAPTOP", -5, 899.0, CREDENTIAL);
+
+    assertFalse(response.success());
+    assertEquals("Order rejected: Quantity must be positive: -5", response.message());
+    assertEquals(true, checkStock("LAPTOP", 2));
   }
 
   @Test
@@ -135,18 +169,18 @@ class OrderServiceTest {
   }
 
   private static ServiceBus busWithInventoryStub(
-      ServiceResponse checkStockResponse, ServiceResponse reserveResponse) {
+      ServiceResponse checkStockResponse, ServiceResponse reserveResponse, AtomicInteger charges) {
     var registry = new ServiceRegistry();
     var stubBus =
         new ServiceBus(registry, new AccessPolicy(Set.of(CREDENTIAL), Set.of(PaymentService.NAME)));
     registry.register(new CustomerService());
-    registry.register(new PaymentService(1000.0));
+    registry.register(countingPaymentService(charges));
     registry.register(new OrderService(stubBus));
     registry.register(
         new Service() {
           @Override
           public String name() {
-            return "inventory";
+            return InventoryService.NAME;
           }
 
           @Override
@@ -155,6 +189,45 @@ class OrderServiceTest {
           }
         });
     return stubBus;
+  }
+
+  private static Service countingPaymentService(AtomicInteger charges) {
+    var payment = new PaymentService(1000.0);
+    return new Service() {
+      @Override
+      public String name() {
+        return PaymentService.NAME;
+      }
+
+      @Override
+      public ServiceResponse handle(ServiceRequest request) {
+        charges.incrementAndGet();
+        return payment.handle(request);
+      }
+    };
+  }
+
+  private ServiceBus busWithRecordingInventory(List<String> operations) {
+    var registry = new ServiceRegistry();
+    var recordingBus =
+        new ServiceBus(registry, new AccessPolicy(Set.of(CREDENTIAL), Set.of(PaymentService.NAME)));
+    registry.register(new CustomerService());
+    registry.register(new PaymentService(1000.0));
+    registry.register(new OrderService(recordingBus));
+    registry.register(
+        new Service() {
+          @Override
+          public String name() {
+            return InventoryService.NAME;
+          }
+
+          @Override
+          public ServiceResponse handle(ServiceRequest request) {
+            operations.add(request.operation());
+            return inventory.handle(request);
+          }
+        });
+    return recordingBus;
   }
 
   private ServiceResponse placeOrder(

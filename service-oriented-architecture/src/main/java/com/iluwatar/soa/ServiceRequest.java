@@ -30,9 +30,10 @@ import java.util.Map;
  * A coarse-grained, self-describing message sent to a service through the {@link ServiceBus}.
  *
  * <p>The request names the target service and the operation to invoke, carries a flat, immutable
- * payload and optionally the caller's credential. Because the payload is plain data rather than
- * typed Java objects, the same contract could be transported as SOAP, JSON or any other
- * interoperable format.
+ * payload and optionally the caller's credential. Because the request payload is plain data rather
+ * than typed Java objects, the same contract could be transported as SOAP, JSON or any other
+ * interoperable format. Responses in this demo carry typed Java objects for brevity; a deployed
+ * system would describe them as plain data too.
  *
  * @param service the name of the target service
  * @param operation the operation the target service should perform

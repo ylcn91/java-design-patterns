@@ -29,6 +29,5 @@ package com.iluwatar.soa;
  *
  * @param id the customer identifier
  * @param name the display name
- * @param email the contact address
  */
-public record Customer(String id, String name, String email) {}
+public record Customer(String id, String name) {}

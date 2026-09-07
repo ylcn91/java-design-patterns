@@ -43,10 +43,9 @@ package com.iluwatar.soa {
     + allows(request : ServiceRequest) : boolean
   }
   class Customer {
-    + Customer(id : String, name : String, email : String)
+    + Customer(id : String, name : String)
     + id() : String
     + name() : String
-    + email() : String
   }
   class CustomerService {
     + NAME : String {static}
@@ -55,6 +54,7 @@ package com.iluwatar.soa {
     + CustomerService(customers : Map<String, Customer>)
     + name() : String
     + handle(request : ServiceRequest) : ServiceResponse
+    - getCustomer(customerId : String) : ServiceResponse
   }
   class InventoryService {
     + NAME : String {static}
@@ -63,6 +63,9 @@ package com.iluwatar.soa {
     + InventoryService(initialStock : Map<String, Integer>)
     + name() : String
     + handle(request : ServiceRequest) : ServiceResponse
+    - checkStock(sku : String, quantity : int) : ServiceResponse
+    - reserve(sku : String, quantity : int) : ServiceResponse
+    - release(sku : String, quantity : int) : ServiceResponse
   }
   class PaymentService {
     + NAME : String {static}
@@ -72,6 +75,7 @@ package com.iluwatar.soa {
     + PaymentService(creditLimit : double)
     + name() : String
     + handle(request : ServiceRequest) : ServiceResponse
+    - charge(customerId : String, amount : double) : ServiceResponse
   }
   class OrderService {
     + NAME : String {static}
@@ -80,10 +84,12 @@ package com.iluwatar.soa {
     + OrderService(bus : ServiceBus)
     + name() : String
     + handle(request : ServiceRequest) : ServiceResponse
+    - placeOrder(request : ServiceRequest) : ServiceResponse
   }
   class OrderConfirmation {
-    + OrderConfirmation(orderId : String, customerName : String, sku : String, quantity : int, paymentReference : String)
+    + OrderConfirmation(orderId : String, customerId : String, customerName : String, sku : String, quantity : int, paymentReference : String)
     + orderId() : String
+    + customerId() : String
     + customerName() : String
     + sku() : String
     + quantity() : int

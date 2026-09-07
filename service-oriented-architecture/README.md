@@ -49,7 +49,9 @@ flowchart LR
     Order -.->|orchestrates via bus| Bus
 ```
 
-Because every service is stateless between calls, each one can be scaled independently. In the example the in-memory maps stand in for each service's own datastore, and the bus stands in for the network protocol (SOAP, REST or messaging) that would carry the messages in a deployed system.
+Because no service keeps per-conversation session state, each one can be scaled independently; the state a service does own is shared between all its callers and guarded for concurrent access. In the example the in-memory maps stand in for each service's own datastore, and the bus stands in for the network protocol (SOAP, REST or messaging) that would carry the messages in a deployed system.
+
+![Service-Oriented Architecture class diagram](./etc/service-oriented-architecture.urm.png)
 
 ## Programmatic Example of Service-Oriented Architecture Pattern in Java
 
@@ -64,7 +66,7 @@ public interface Service {
 }
 ```
 
-Messages are coarse-grained and self-describing. The payload is plain data, which is what makes the contract interoperable: the same request could travel as SOAP, JSON or any other wire format.
+Messages are coarse-grained and self-describing. The request payload is plain data, which is what makes the contract interoperable: the same request could travel as SOAP, JSON or any other wire format. Responses in this demo carry typed Java objects for brevity; a deployed system would describe them as plain data too.
 
 ```java
 public record ServiceRequest(
@@ -102,7 +104,7 @@ public class ServiceRegistry {
 }
 ```
 
-The bus is the communication backbone. It resolves the target through the registry, applies cross-cutting concerns in a single place (access control, tracing, timing) and turns provider failures into error responses so that consumers never see provider exceptions.
+The bus is the communication backbone. It applies cross-cutting concerns in a single place (access control, tracing, timing), resolves the target through the registry and turns provider failures into error responses so that consumers never see provider exceptions. The access check runs before the lookup, so a caller that may not reach a service learns nothing about what the registry holds.
 
 ```java
 @Slf4j
@@ -113,14 +115,14 @@ public class ServiceBus {
   public ServiceBus(ServiceRegistry registry, AccessPolicy policy) { ... }
 
   public ServiceResponse send(ServiceRequest request) {
-    var service = registry.lookup(request.service());
-    if (service.isEmpty()) {
-      return ServiceResponse.error("No such service: " + request.service());
-    }
     if (!policy.allows(request)) {
       LOGGER.warn("Access denied to {}.{} for {} caller", request.service(), request.operation(),
           request.credential() == null ? "anonymous" : "credentialed");
       return ServiceResponse.error("Access denied to " + request.service());
+    }
+    var service = registry.lookup(request.service());
+    if (service.isEmpty()) {
+      return ServiceResponse.error("No such service: " + request.service());
     }
     LOGGER.info("-> {}.{} payload={}", request.service(), request.operation(), request.payload());
     var start = System.nanoTime();
@@ -160,7 +162,7 @@ var denied = bus.send(new ServiceRequest("payment", "charge",
 // denied = ServiceResponse[success=false, body=null, message=Access denied to payment]
 ```
 
-Each enterprise service owns exactly one business capability and is stateless between calls. Operations are dispatched with a switch expression on the operation name.
+Each enterprise service owns exactly one business capability and keeps no per-conversation session state; the state it does own is private to it and guarded for concurrent access. Operations are dispatched with a switch expression on the operation name.
 
 ```java
 public class CustomerService implements Service {
@@ -177,9 +179,11 @@ public class CustomerService implements Service {
 }
 ```
 
-`InventoryService` answers `checkStock` and `reserve`, and `PaymentService` answers `charge` in the same style.
+`InventoryService` answers `checkStock`, `reserve` and `release`, and `PaymentService` answers `charge` in the same style. Both reject a non-positive quantity or amount, because a service validates its own input rather than trusting its callers.
 
 The composite `OrderService` is where SOA shows its strength. It implements the same contract as the others, but delivers a higher level capability by orchestrating the lower level services through the bus. It depends only on service names and message contracts, never on the provider classes, and it forwards the caller's credential so the bus can authorise every downstream call.
+
+No transaction spans the services, so the order service compensates instead: it reserves the stock before it charges the customer, and releases the reservation again when the charge fails. Doing it the other way round would leave a customer charged for an order that was never reserved.
 
 ```java
 @RequiredArgsConstructor
@@ -199,22 +203,30 @@ public class OrderService implements Service {
     }
     var stock = bus.send(new ServiceRequest(INVENTORY_SERVICE, "checkStock",
         Map.of("sku", sku, "quantity", quantity), credential));
-    if (!stock.success() || !Boolean.TRUE.equals(stock.body())) {
+    if (!stock.success()) {
+      return ServiceResponse.error("Order rejected: " + stock.message());
+    }
+    if (!Boolean.TRUE.equals(stock.body())) {
       return ServiceResponse.error("Order rejected: insufficient stock for " + sku);
+    }
+    var reservation = bus.send(new ServiceRequest(INVENTORY_SERVICE, "reserve",
+        Map.of("sku", sku, "quantity", quantity), credential));
+    if (!reservation.success()) {
+      return ServiceResponse.error("Order rejected: " + reservation.message());
     }
     var payment = bus.send(new ServiceRequest(PAYMENT_SERVICE, "charge",
         Map.of("customerId", customerId, "amount", amount), credential));
     if (!payment.success()) {
+      bus.send(new ServiceRequest(INVENTORY_SERVICE, "release", // compensate the reservation
+          Map.of("sku", sku, "quantity", quantity), credential));
       return ServiceResponse.error("Order rejected: " + payment.message());
     }
-    bus.send(new ServiceRequest(INVENTORY_SERVICE, "reserve",
-        Map.of("sku", sku, "quantity", quantity), credential));
     return ServiceResponse.ok(new OrderConfirmation(...));
   }
 }
 ```
 
-The application wires everything together behind a bus that protects the payment service and sends four requests: an order with a valid credential that succeeds, an order that fails because of stock, a request for a service nobody registered, and an anonymous order that the bus stops at the payment step.
+The application wires everything together behind a bus that protects the payment service and sends four requests: an order with a valid credential that succeeds, an order that fails because of stock, a request for a service nobody registered, and an anonymous order that the bus stops at the payment step, after which the order service releases the stock it had already reserved.
 
 ```java
 var registry = new ServiceRegistry();
@@ -239,35 +251,49 @@ var denied = bus.send(new ServiceRequest(OrderService.NAME, "placeOrder",
 Running the program produces output similar to this:
 
 ```
+Bootstrapping the service registry and the service bus
 Registered service 'customer' (CustomerService)
 Registered service 'inventory' (InventoryService)
 Registered service 'payment' (PaymentService)
 Registered service 'order' (OrderService)
--> order.placeOrder payload={amount=899.0, quantity=2, sku=LAPTOP, customerId=C-1}
+Available services: [customer, order, inventory, payment]
+Placing an order with a valid credential, it should succeed
+-> order.placeOrder payload={amount=899.0, customerId=C-1, quantity=2, sku=LAPTOP}
 -> customer.getCustomer payload={customerId=C-1}
 <- customer.getCustomer success=true in 0 ms
--> inventory.checkStock payload={quantity=2, sku=LAPTOP}
+-> inventory.checkStock payload={sku=LAPTOP, quantity=2}
 <- inventory.checkStock success=true in 0 ms
+-> inventory.reserve payload={sku=LAPTOP, quantity=2}
+<- inventory.reserve success=true in 0 ms
 -> payment.charge payload={amount=899.0, customerId=C-1}
 <- payment.charge success=true in 0 ms
--> inventory.reserve payload={quantity=2, sku=LAPTOP}
-<- inventory.reserve success=true in 0 ms
 <- order.placeOrder success=true in 1 ms
-Order outcome: ServiceResponse[success=true, body=OrderConfirmation[orderId=ORD-1, customerName=Alice Smith, sku=LAPTOP, quantity=2, paymentReference=PAY-1], message=]
-...
+Order outcome: ServiceResponse[success=true, body=OrderConfirmation[orderId=ORD-1, customerId=C-1, customerName=Alice Smith, sku=LAPTOP, quantity=2, paymentReference=PAY-1], message=]
+Placing an order that should be rejected because of stock
+-> order.placeOrder payload={amount=499.0, customerId=C-2, quantity=50, sku=PHONE}
+-> customer.getCustomer payload={customerId=C-2}
+<- customer.getCustomer success=true in 0 ms
+-> inventory.checkStock payload={sku=PHONE, quantity=50}
+<- inventory.checkStock success=true in 0 ms
+<- order.placeOrder success=false in 0 ms
 Order outcome: ServiceResponse[success=false, body=null, message=Order rejected: insufficient stock for PHONE]
+Addressing a service that is not registered
 No service registered under 'shipping'
 Bus outcome: ServiceResponse[success=false, body=null, message=No such service: shipping]
--> order.placeOrder payload={amount=899.0, quantity=1, sku=LAPTOP, customerId=C-1}
-...
+Placing an order anonymously, the bus should deny access to payment
+-> order.placeOrder payload={amount=899.0, customerId=C-1, quantity=1, sku=LAPTOP}
+-> customer.getCustomer payload={customerId=C-1}
+<- customer.getCustomer success=true in 0 ms
+-> inventory.checkStock payload={sku=LAPTOP, quantity=1}
+<- inventory.checkStock success=true in 0 ms
+-> inventory.reserve payload={sku=LAPTOP, quantity=1}
+<- inventory.reserve success=true in 0 ms
 Access denied to payment.charge for anonymous caller
+-> inventory.release payload={sku=LAPTOP, quantity=1}
+<- inventory.release success=true in 0 ms
 <- order.placeOrder success=false in 0 ms
 Order outcome: ServiceResponse[success=false, body=null, message=Order rejected: Access denied to payment]
 ```
-
-## Class diagram
-
-See [service-oriented-architecture.urm.puml](./etc/service-oriented-architecture.urm.puml) for the PlantUML class diagram.
 
 ## When to Use the Service-Oriented Architecture Pattern in Java
 

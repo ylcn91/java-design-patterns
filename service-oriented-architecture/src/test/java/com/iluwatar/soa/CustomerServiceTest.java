@@ -42,7 +42,7 @@ class CustomerServiceTest {
             new ServiceRequest(CustomerService.NAME, "getCustomer", Map.of("customerId", "C-2")));
 
     assertTrue(response.success());
-    assertEquals(new Customer("C-2", "Bob Jones", "bob@example.com"), response.body());
+    assertEquals(new Customer("C-2", "Bob Jones"), response.body());
   }
 
   @Test

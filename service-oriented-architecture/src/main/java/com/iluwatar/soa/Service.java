@@ -38,8 +38,9 @@ public interface Service {
   String name();
 
   /**
-   * Handles a single request. Implementations must be stateless between calls: every request
-   * carries everything the service needs to process it.
+   * Handles a single request. Implementations hold no per-conversation session state: every request
+   * carries everything the service needs to process it, and any state a service owns is shared
+   * between callers and guarded for concurrent access.
    *
    * @param request the incoming message
    * @return the outcome of the operation

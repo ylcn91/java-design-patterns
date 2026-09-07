@@ -30,11 +30,12 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * The service bus is the communication backbone of the architecture.
  *
- * <p>Consumers hand every request to the bus. The bus discovers the target service in the {@link
- * ServiceRegistry}, applies cross-cutting concerns in one place (access control through the {@link
- * AccessPolicy}, tracing and timing) and shields consumers from provider failures by translating
- * exceptions into error responses. Because the consumer only talks to the bus, the provider can be
- * replaced or relocated transparently.
+ * <p>Consumers hand every request to the bus. The bus applies cross-cutting concerns in one place
+ * (access control through the {@link AccessPolicy}, tracing and timing), discovers the target
+ * service in the {@link ServiceRegistry} and shields consumers from provider failures by
+ * translating exceptions into error responses. Access control comes first, so a caller that may not
+ * reach a service learns nothing about what the registry holds. Because the consumer only talks to
+ * the bus, the provider can be replaced or relocated transparently.
  */
 @Slf4j
 public class ServiceBus {
@@ -61,11 +62,6 @@ public class ServiceBus {
    *     denied or the service fails
    */
   public ServiceResponse send(ServiceRequest request) {
-    var service = registry.lookup(request.service());
-    if (service.isEmpty()) {
-      LOGGER.warn("No service registered under '{}'", request.service());
-      return ServiceResponse.error("No such service: " + request.service());
-    }
     if (!policy.allows(request)) {
       LOGGER.warn(
           "Access denied to {}.{} for {} caller",
@@ -73,6 +69,11 @@ public class ServiceBus {
           request.operation(),
           request.credential() == null ? "anonymous" : "credentialed");
       return ServiceResponse.error("Access denied to " + request.service());
+    }
+    var service = registry.lookup(request.service());
+    if (service.isEmpty()) {
+      LOGGER.warn("No service registered under '{}'", request.service());
+      return ServiceResponse.error("No such service: " + request.service());
     }
     LOGGER.info("-> {}.{} payload={}", request.service(), request.operation(), request.payload());
     var start = System.nanoTime();

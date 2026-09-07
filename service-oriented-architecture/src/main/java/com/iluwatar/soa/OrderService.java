@@ -37,6 +37,10 @@ import lombok.RequiredArgsConstructor;
  * credential so that the bus can authorise each downstream call, and composes the responses. This
  * is how SOA builds higher level services out of reusable lower level ones.
  *
+ * <p>There is no distributed transaction spanning the services, so the order service compensates
+ * instead: it reserves the stock before it charges the customer and releases the reservation again
+ * when the charge fails.
+ *
  * <p>Operations:
  *
  * <ul>
@@ -60,13 +64,19 @@ public class OrderService implements Service {
    * The result of a successfully placed order.
    *
    * @param orderId the generated order identifier
+   * @param customerId the identifier of the ordering customer
    * @param customerName the name of the ordering customer
    * @param sku the ordered product
    * @param quantity the ordered quantity
    * @param paymentReference the reference returned by the payment service
    */
   public record OrderConfirmation(
-      String orderId, String customerName, String sku, int quantity, String paymentReference) {}
+      String orderId,
+      String customerId,
+      String customerName,
+      String sku,
+      int quantity,
+      String paymentReference) {}
 
   @Override
   public String name() {
@@ -96,6 +106,8 @@ public class OrderService implements Service {
       return ServiceResponse.error("Order rejected: " + customer.message());
     }
 
+    // This read is kept to illustrate service composition, not as a guard: reserve re-checks the
+    // stock atomically, so the order stays correct even though the level can change in between.
     var stock =
         bus.send(
             new ServiceRequest(
@@ -103,19 +115,11 @@ public class OrderService implements Service {
                 "checkStock",
                 Map.of("sku", sku, "quantity", quantity),
                 credential));
-    if (!stock.success() || !Boolean.TRUE.equals(stock.body())) {
-      return ServiceResponse.error("Order rejected: insufficient stock for " + sku);
+    if (!stock.success()) {
+      return ServiceResponse.error("Order rejected: " + stock.message());
     }
-
-    var payment =
-        bus.send(
-            new ServiceRequest(
-                PAYMENT_SERVICE,
-                "charge",
-                Map.of("customerId", customerId, "amount", amount),
-                credential));
-    if (!payment.success()) {
-      return ServiceResponse.error("Order rejected: " + payment.message());
+    if (!Boolean.TRUE.equals(stock.body())) {
+      return ServiceResponse.error("Order rejected: insufficient stock for " + sku);
     }
 
     var reservation =
@@ -129,10 +133,26 @@ public class OrderService implements Service {
       return ServiceResponse.error("Order rejected: " + reservation.message());
     }
 
+    var payment =
+        bus.send(
+            new ServiceRequest(
+                PAYMENT_SERVICE,
+                "charge",
+                Map.of("customerId", customerId, "amount", amount),
+                credential));
+    if (!payment.success()) {
+      bus.send(
+          new ServiceRequest(
+              INVENTORY_SERVICE, "release", Map.of("sku", sku, "quantity", quantity), credential));
+      return ServiceResponse.error("Order rejected: " + payment.message());
+    }
+
+    var orderingCustomer = (Customer) customer.body();
     var confirmation =
         new OrderConfirmation(
             "ORD-" + sequence.incrementAndGet(),
-            ((Customer) customer.body()).name(),
+            orderingCustomer.id(),
+            orderingCustomer.name(),
             sku,
             quantity,
             (String) payment.body());

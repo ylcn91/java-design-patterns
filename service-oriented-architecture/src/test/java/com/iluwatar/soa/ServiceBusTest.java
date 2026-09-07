@@ -106,6 +106,16 @@ class ServiceBusTest {
   }
 
   @Test
+  void shouldDenyProtectedServiceBeforeRevealingThatItIsNotRegistered() {
+    var securedBus = new ServiceBus(registry, new AccessPolicy(Set.of("key"), Set.of("counter")));
+
+    var response = securedBus.send(new ServiceRequest("counter", "count", Map.of()));
+
+    assertFalse(response.success());
+    assertEquals("Access denied to counter", response.message());
+  }
+
+  @Test
   void shouldPassValidCredentialThroughToProtectedService() {
     var invocations = new AtomicInteger();
     registry.register(countingService(invocations));

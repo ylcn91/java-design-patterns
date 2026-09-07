@@ -43,8 +43,8 @@ import lombok.extern.slf4j.Slf4j;
  *       isolates consumers from provider failures
  *   <li>{@link AccessPolicy}: security as a cross-cutting concern, enforced by the bus so that the
  *       services themselves contain no security code
- *   <li>{@link CustomerService}, {@link InventoryService}, {@link PaymentService}: stateless
- *       enterprise services that each own one business capability
+ *   <li>{@link CustomerService}, {@link InventoryService}, {@link PaymentService}: enterprise
+ *       services that each own one business capability and keep no per-conversation session state
  *   <li>{@link OrderService}: a composite service that orchestrates the others through the bus
  * </ul>
  *

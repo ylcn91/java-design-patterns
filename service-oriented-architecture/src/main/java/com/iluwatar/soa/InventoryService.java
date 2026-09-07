@@ -38,6 +38,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       available
  *   <li>{@code reserve} with {@code sku} and {@code quantity} takes the quantity out of stock and
  *       returns the remaining amount
+ *   <li>{@code release} with {@code sku} and {@code quantity} puts a reserved quantity back into
+ *       stock and returns the remaining amount, compensating a reservation that cannot be completed
  * </ul>
  */
 public class InventoryService implements Service {
@@ -68,15 +70,23 @@ public class InventoryService implements Service {
           request.param("sku", String.class), request.param("quantity", Integer.class));
       case "reserve" -> reserve(
           request.param("sku", String.class), request.param("quantity", Integer.class));
+      case "release" -> release(
+          request.param("sku", String.class), request.param("quantity", Integer.class));
       default -> ServiceResponse.error("Unknown operation: " + request.operation());
     };
   }
 
   private ServiceResponse checkStock(String sku, int quantity) {
+    if (quantity <= 0) {
+      return ServiceResponse.error("Quantity must be positive: " + quantity);
+    }
     return ServiceResponse.ok(stock.getOrDefault(sku, 0) >= quantity);
   }
 
   private ServiceResponse reserve(String sku, int quantity) {
+    if (quantity <= 0) {
+      return ServiceResponse.error("Quantity must be positive: " + quantity);
+    }
     var reserved = new AtomicBoolean();
     var remaining =
         stock.computeIfPresent(
@@ -96,6 +106,17 @@ public class InventoryService implements Service {
               + quantity
               + ", available "
               + (remaining == null ? 0 : remaining));
+    }
+    return ServiceResponse.ok(remaining);
+  }
+
+  private ServiceResponse release(String sku, int quantity) {
+    if (quantity <= 0) {
+      return ServiceResponse.error("Quantity must be positive: " + quantity);
+    }
+    var remaining = stock.computeIfPresent(sku, (key, available) -> available + quantity);
+    if (remaining == null) {
+      return ServiceResponse.error("Unknown sku: " + sku);
     }
     return ServiceResponse.ok(remaining);
   }
