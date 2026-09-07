@@ -59,6 +59,8 @@ sequenceDiagram
     end
 ```
 
+![Timeout class diagram](./etc/timeout.urm.png)
+
 ## Programmatic Example of Timeout Pattern in Java
 
 The example models an online shop that calls two downstream services. The product catalog is fast; the recommendation engine is slow. Each gets its own time limit.
@@ -87,34 +89,9 @@ public record TimeoutPolicy(String serviceName, Duration timeout) {
 }
 ```
 
-2. **Keep the limits configurable in one place**
+2. **Enforce the limit**
 
-   A `TimeoutRegistry` stores the policies and hands out a default for services nobody configured explicitly.
-
-```java
-public class TimeoutRegistry {
-
-  private final Map<String, TimeoutPolicy> policies = new ConcurrentHashMap<>();
-  private final Duration defaultTimeout;
-
-  public TimeoutRegistry(Duration defaultTimeout) {
-    this.defaultTimeout = Objects.requireNonNull(defaultTimeout, "defaultTimeout");
-  }
-
-  public TimeoutRegistry register(TimeoutPolicy policy) {
-    policies.put(policy.serviceName(), policy);
-    return this;
-  }
-
-  public TimeoutPolicy policyFor(String serviceName) {
-    return policies.getOrDefault(serviceName, new TimeoutPolicy(serviceName, defaultTimeout));
-  }
-}
-```
-
-3. **Enforce the limit**
-
-   `TimeoutExecutor` runs the call on a worker thread and waits for at most the configured duration. On a timeout it cancels the worker with an interrupt, logs the event, counts it in `TimeoutMetrics`, and returns the fallback. A failure raised by the service is not a timeout and is rethrown as `ServiceCallException`.
+   `TimeoutExecutor` runs the call on a worker thread and waits for at most the configured duration. On a timeout it cancels the worker with an interrupt, logs the event, counts it in `TimeoutMetrics`, and returns the fallback. A failure raised by the service, or a call the pool refuses to accept, is not a timeout and is rethrown as `ServiceCallException`.
 
 ```java
 @Slf4j
@@ -130,8 +107,9 @@ public class TimeoutExecutor implements AutoCloseable {
   public <T> T execute(TimeoutPolicy policy, Callable<T> call, Supplier<T> fallback) {
     var serviceName = policy.serviceName();
     var limitMillis = policy.timeout().toMillis();
-    var future = executor.submit(call);
+    Future<T> future = null;
     try {
+      future = executor.submit(call);
       var result = future.get(limitMillis, TimeUnit.MILLISECONDS);
       LOGGER.info("{} responded within its {} ms limit", serviceName, limitMillis);
       return result;
@@ -147,6 +125,8 @@ public class TimeoutExecutor implements AutoCloseable {
       future.cancel(true);
       Thread.currentThread().interrupt();
       throw new ServiceCallException(serviceName, e);
+    } catch (RejectedExecutionException e) {
+      throw new ServiceCallException(serviceName, e);
     }
   }
 
@@ -157,64 +137,52 @@ public class TimeoutExecutor implements AutoCloseable {
 }
 ```
 
-4. **Make the slow service cooperate with cancellation**
+3. **Make the service cooperate with cancellation**
 
-   The simulated `RecommendationService` sleeps interruptibly, so the interrupt sent by the executor actually stops the work instead of leaving it running in the background.
+   The simulated `DownstreamService` sleeps interruptibly, so the interrupt sent by the executor actually stops the work instead of leaving it running in the background. Its name, latency and payload are constructor arguments, so the same class plays both the fast catalog and the slow recommendation engine.
 
 ```java
-public List<String> recommendationsFor(String customer) throws InterruptedException {
-  LOGGER.info(
-      "{}: computing recommendations for {}, expected latency {} ms",
-      NAME,
-      customer,
-      latency.toMillis());
+public List<String> fetch() throws InterruptedException {
+  LOGGER.info("{}: responding, expected latency {} ms", name, latency.toMillis());
   try {
     Thread.sleep(latency);
   } catch (InterruptedException e) {
-    LOGGER.info("{}: interrupted, abandoning the computation for {}", NAME, customer);
+    LOGGER.info("{}: interrupted, abandoning the call", name);
     throw e;
   }
-  return List.of("Mechanical keyboard", "USB-C dock");
+  return items;
 }
 ```
 
-5. **Wire it together**
+4. **Wire it together**
 
-   `App` registers a 500 ms limit for the catalog and a 100 ms limit for recommendations. Each call lives in a small helper that pairs the policy with the call and its fallback; `main` runs both. The catalog answers in time; the recommendation engine needs 400 ms, so the customer sees popular items instead and the timeout counter shows one event.
+   `App` gives the catalog a 500 ms limit and recommendations a 100 ms one, then runs both calls through a small helper that pairs the policy with the call and its fallback. The catalog answers in time; the recommendation engine needs 400 ms, so the customer sees popular items instead and the timeout counter shows one event.
 
 ```java
-static List<String> loadProducts(
-    TimeoutExecutor executor, TimeoutRegistry registry, ProductCatalogService catalog) {
-  return executor.execute(
-      registry.policyFor(ProductCatalogService.NAME), catalog::fetchProducts, List::of);
-}
-
-static List<String> loadRecommendations(
+static List<String> call(
     TimeoutExecutor executor,
-    TimeoutRegistry registry,
-    RecommendationService recommendations,
-    String customer) {
-  return executor.execute(
-      registry.policyFor(RecommendationService.NAME),
-      () -> recommendations.recommendationsFor(customer),
-      () -> POPULAR_ITEMS);
+    TimeoutPolicy policy,
+    DownstreamService service,
+    List<String> fallback) {
+  return executor.execute(policy, service::fetch, () -> fallback);
 }
 ```
 
 ```java
-var registry =
-    new TimeoutRegistry(Duration.ofMillis(300))
-        .register(TimeoutPolicy.of(ProductCatalogService.NAME, 500))
-        .register(TimeoutPolicy.of(RecommendationService.NAME, 100));
-
-var catalog = new ProductCatalogService(Duration.ofMillis(50));
-var recommendations = new RecommendationService(Duration.ofMillis(400));
+var catalog =
+    new DownstreamService(
+        "product-catalog", Duration.ofMillis(50), List.of("Laptop", "Headphones", "Monitor"));
+var recommendations =
+    new DownstreamService(
+        "recommendations", Duration.ofMillis(400), List.of("Mechanical keyboard", "USB-C dock"));
+var catalogPolicy = TimeoutPolicy.of(catalog.name(), 500);
+var recommendationPolicy = TimeoutPolicy.of(recommendations.name(), 100);
 
 try (var executor = new TimeoutExecutor()) {
-  var products = loadProducts(executor, registry, catalog);
+  var products = call(executor, catalogPolicy, catalog, List.of());
   LOGGER.info("Products: {}", products);
 
-  var suggested = loadRecommendations(executor, registry, recommendations, "alice");
+  var suggested = call(executor, recommendationPolicy, recommendations, POPULAR_ITEMS);
   LOGGER.info("Recommendations shown to alice: {}", suggested);
 
   LOGGER.info("Timeouts per service: {}", executor.metrics().snapshot());
@@ -226,20 +194,18 @@ Running the application produces output along these lines:
 ```
 Configured per-service limits: catalog 500 ms, recommendations 100 ms
 Calling product-catalog
-product-catalog: fetching products, expected latency 50 ms
+product-catalog: responding, expected latency 50 ms
 product-catalog responded within its 500 ms limit
 Products: [Laptop, Headphones, Monitor]
 Calling recommendations
-recommendations: computing recommendations for alice, expected latency 400 ms
+recommendations: responding, expected latency 400 ms
+recommendations: interrupted, abandoning the call
 recommendations exceeded its 100 ms limit; call cancelled, using fallback
-recommendations: interrupted, abandoning the computation for alice
 Recommendations shown to alice: [Wireless mouse, Webcam]
 Timeouts per service: {recommendations=1}
 ```
 
-## Class diagram
-
-See [timeout.urm.puml](./etc/timeout.urm.puml) for the PlantUML class diagram.
+The "exceeded its 100 ms limit" line is written by the caller and the "interrupted, abandoning" line by the worker thread, so the two may appear in either order from run to run.
 
 ## When to Use the Timeout Pattern in Java
 

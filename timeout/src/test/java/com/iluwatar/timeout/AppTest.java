@@ -34,8 +34,9 @@ import org.junit.jupiter.api.Test;
 
 class AppTest {
 
-  private static final TimeoutRegistry GENEROUS = new TimeoutRegistry(Duration.ofSeconds(5));
-  private static final TimeoutRegistry STRICT = new TimeoutRegistry(Duration.ofMillis(50));
+  private static final TimeoutPolicy GENEROUS = TimeoutPolicy.of("catalog", 5_000);
+  private static final TimeoutPolicy STRICT = TimeoutPolicy.of("catalog", 50);
+  private static final List<String> FALLBACK = List.of("Webcam");
 
   @Test
   void shouldLaunchApp() {
@@ -48,44 +49,20 @@ class AppTest {
   }
 
   @Test
-  void loadsProductsWithinLimit() {
-    try (var executor = new TimeoutExecutor()) {
-      var products =
-          App.loadProducts(executor, GENEROUS, new ProductCatalogService(Duration.ofMillis(1)));
+  void returnsTheResponseOfAServiceThatAnswersWithinItsLimit() {
+    var service = new DownstreamService("catalog", Duration.ofMillis(1), List.of("Laptop"));
 
-      assertEquals(List.of("Laptop", "Headphones", "Monitor"), products);
+    try (var executor = new TimeoutExecutor()) {
+      assertEquals(List.of("Laptop"), App.call(executor, GENEROUS, service, FALLBACK));
     }
   }
 
   @Test
-  void showsEmptyCatalogWhenCatalogExceedsLimit() {
+  void returnsTheFallbackWhenTheServiceExceedsItsLimit() {
+    var service = new DownstreamService("catalog", Duration.ofSeconds(60), List.of("Laptop"));
+
     try (var executor = new TimeoutExecutor()) {
-      var products =
-          App.loadProducts(executor, STRICT, new ProductCatalogService(Duration.ofSeconds(60)));
-
-      assertEquals(List.of(), products);
-    }
-  }
-
-  @Test
-  void loadsRecommendationsWithinLimit() {
-    try (var executor = new TimeoutExecutor()) {
-      var suggested =
-          App.loadRecommendations(
-              executor, GENEROUS, new RecommendationService(Duration.ofMillis(1)), "alice");
-
-      assertEquals(List.of("Mechanical keyboard", "USB-C dock"), suggested);
-    }
-  }
-
-  @Test
-  void showsPopularItemsWhenRecommendationsExceedLimit() {
-    try (var executor = new TimeoutExecutor()) {
-      var suggested =
-          App.loadRecommendations(
-              executor, STRICT, new RecommendationService(Duration.ofSeconds(60)), "alice");
-
-      assertEquals(List.of("Wireless mouse", "Webcam"), suggested);
+      assertEquals(FALLBACK, App.call(executor, STRICT, service, FALLBACK));
     }
   }
 }

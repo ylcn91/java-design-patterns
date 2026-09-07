@@ -29,45 +29,55 @@ import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Simulated recommendation engine. It is slow, so it demonstrates what happens when a dependency
- * misses its limit: the call is interrupted and the caller continues with a fallback.
+ * Simulated downstream service used by the demo.
+ *
+ * <p>The simulated latency decides whether the service answers within the {@link TimeoutPolicy} of
+ * the caller or misses it. The sleep is interruptible, so the interrupt sent by {@link
+ * TimeoutExecutor} actually stops the work instead of leaving it running in the background.
  */
 @Slf4j
-public class RecommendationService {
+public class DownstreamService {
 
-  /** Name under which the service is registered in the {@link TimeoutRegistry}. */
-  public static final String NAME = "recommendations";
-
+  private final String name;
   private final Duration latency;
+  private final List<String> items;
 
   /**
    * Creates the service.
    *
+   * @param name name the service is known by
    * @param latency simulated response time
+   * @param items payload returned once the simulated call completes
    */
-  public RecommendationService(Duration latency) {
+  public DownstreamService(String name, Duration latency, List<String> items) {
+    this.name = name;
     this.latency = latency;
+    this.items = List.copyOf(items);
   }
 
   /**
-   * Computes personalised recommendations for a customer.
+   * Returns the name the service is known by.
    *
-   * @param customer customer identifier
-   * @return recommended product names
-   * @throws InterruptedException if the call is cancelled before the computation finishes
+   * @return the service name
    */
-  public List<String> recommendationsFor(String customer) throws InterruptedException {
-    LOGGER.info(
-        "{}: computing recommendations for {}, expected latency {} ms",
-        NAME,
-        customer,
-        latency.toMillis());
+  public String name() {
+    return name;
+  }
+
+  /**
+   * Answers the call after the simulated latency.
+   *
+   * @return the payload of the service
+   * @throws InterruptedException if the call is cancelled before the simulated latency elapses
+   */
+  public List<String> fetch() throws InterruptedException {
+    LOGGER.info("{}: responding, expected latency {} ms", name, latency.toMillis());
     try {
       Thread.sleep(latency);
     } catch (InterruptedException e) {
-      LOGGER.info("{}: interrupted, abandoning the computation for {}", NAME, customer);
+      LOGGER.info("{}: interrupted, abandoning the call", name);
       throw e;
     }
-    return List.of("Mechanical keyboard", "USB-C dock");
+    return items;
   }
 }

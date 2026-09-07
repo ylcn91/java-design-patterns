@@ -24,7 +24,8 @@
  */
 package com.iluwatar.timeout;
 
-import java.util.Map;
+import java.util.Collections;
+import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -63,9 +64,9 @@ public class TimeoutMetrics {
    *
    * @return service name to timeout count
    */
-  public Map<String, Integer> snapshot() {
+  public SortedMap<String, Integer> snapshot() {
     var snapshot = new TreeMap<String, Integer>();
     timeouts.forEach((name, counter) -> snapshot.put(name, counter.get()));
-    return Map.copyOf(snapshot);
+    return Collections.unmodifiableSortedMap(snapshot);
   }
 }

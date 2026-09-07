@@ -29,6 +29,8 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
@@ -71,13 +73,15 @@ public class TimeoutExecutor implements AutoCloseable {
    * @param fallback answer to use when the call does not complete in time
    * @param <T> type of the response
    * @return the response of the call, or the fallback if the limit was exceeded
-   * @throws ServiceCallException if the call fails or the waiting thread is interrupted
+   * @throws ServiceCallException if the call cannot be submitted, fails, or the waiting thread is
+   *     interrupted
    */
   public <T> T execute(TimeoutPolicy policy, Callable<T> call, Supplier<T> fallback) {
     var serviceName = policy.serviceName();
     var limitMillis = policy.timeout().toMillis();
-    var future = executor.submit(call);
+    Future<T> future = null;
     try {
+      future = executor.submit(call);
       var result = future.get(limitMillis, TimeUnit.MILLISECONDS);
       LOGGER.info("{} responded within its {} ms limit", serviceName, limitMillis);
       return result;
@@ -92,6 +96,8 @@ public class TimeoutExecutor implements AutoCloseable {
     } catch (InterruptedException e) {
       future.cancel(true);
       Thread.currentThread().interrupt();
+      throw new ServiceCallException(serviceName, e);
+    } catch (RejectedExecutionException e) {
       throw new ServiceCallException(serviceName, e);
     }
   }

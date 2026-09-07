@@ -25,30 +25,31 @@
 package com.iluwatar.timeout;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
-class TimeoutRegistryTest {
-
-  private final TimeoutRegistry registry = new TimeoutRegistry(Duration.ofMillis(300));
+class DownstreamServiceTest {
 
   @Test
-  void returnsRegisteredPolicy() {
-    registry.register(TimeoutPolicy.of("catalog", 500));
+  void returnsItsItemsAfterTheSimulatedLatency() throws InterruptedException {
+    var service = new DownstreamService("catalog", Duration.ofMillis(1), List.of("Laptop"));
 
-    assertEquals(TimeoutPolicy.of("catalog", 500), registry.policyFor("catalog"));
+    assertEquals("catalog", service.name());
+    assertEquals(List.of("Laptop"), service.fetch());
   }
 
   @Test
-  void fallsBackToDefaultLimitForUnknownService() {
-    assertEquals(TimeoutPolicy.of("unknown", 300), registry.policyFor("unknown"));
-  }
+  void abandonsTheCallWhenInterrupted() {
+    var service = new DownstreamService("catalog", Duration.ofSeconds(60), List.of("Laptop"));
 
-  @Test
-  void replacesExistingPolicy() {
-    registry.register(TimeoutPolicy.of("catalog", 500)).register(TimeoutPolicy.of("catalog", 50));
-
-    assertEquals(Duration.ofMillis(50), registry.policyFor("catalog").timeout());
+    Thread.currentThread().interrupt();
+    try {
+      assertThrows(InterruptedException.class, service::fetch);
+    } finally {
+      Thread.interrupted();
+    }
   }
 }

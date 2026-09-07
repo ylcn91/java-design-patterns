@@ -30,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -130,6 +131,17 @@ class TimeoutExecutorTest {
   }
 
   @Test
+  void keepsSnapshotSortedByServiceName() {
+    var metrics = executor.metrics();
+    metrics.recordTimeout("payments");
+    metrics.recordTimeout("analytics");
+    metrics.recordTimeout("catalog");
+
+    assertEquals(
+        List.of("analytics", "catalog", "payments"), List.copyOf(metrics.snapshot().keySet()));
+  }
+
+  @Test
   void propagatesInterruptionOfTheCaller() {
     Callable<String> slowCall =
         () -> {
@@ -152,8 +164,12 @@ class TimeoutExecutorTest {
   void rejectsCallsAfterClose() {
     executor.close();
 
-    assertThrows(
-        RejectedExecutionException.class,
-        () -> executor.execute(GENEROUS, () -> "ignored", () -> "fallback"));
+    var thrown =
+        assertThrows(
+            ServiceCallException.class,
+            () -> executor.execute(GENEROUS, () -> "ignored", () -> "fallback"));
+
+    assertInstanceOf(RejectedExecutionException.class, thrown.getCause());
+    assertEquals(0, executor.metrics().timeoutCount(GENEROUS.serviceName()));
   }
 }

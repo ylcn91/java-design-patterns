@@ -34,9 +34,8 @@ import lombok.extern.slf4j.Slf4j;
  * system stalls. With a limit the caller abandons the slow call, records the event and continues
  * with a fallback, keeping latency predictable and failures contained.
  *
- * <p>The building blocks are a {@link TimeoutPolicy} per service, a {@link TimeoutRegistry} that
- * makes the limits configurable in one place, and a {@link TimeoutExecutor} that enforces them,
- * cancels calls that overrun, and counts timeouts in {@link TimeoutMetrics}.
+ * <p>The building blocks are a {@link TimeoutPolicy} per service and a {@link TimeoutExecutor} that
+ * enforces them, cancels calls that overrun, and counts timeouts in {@link TimeoutMetrics}.
  *
  * <p>The demo wires two services with different limits. The product catalog answers well within its
  * 500 ms budget and returns real data. The recommendation engine needs 400 ms but is only allowed
@@ -54,22 +53,25 @@ public class App {
    * @param args command line arguments, not used
    */
   public static void main(String[] args) {
-    var registry =
-        new TimeoutRegistry(Duration.ofMillis(300))
-            .register(TimeoutPolicy.of(ProductCatalogService.NAME, 500))
-            .register(TimeoutPolicy.of(RecommendationService.NAME, 100));
+    var catalog =
+        new DownstreamService(
+            "product-catalog", Duration.ofMillis(50), List.of("Laptop", "Headphones", "Monitor"));
+    var recommendations =
+        new DownstreamService(
+            "recommendations",
+            Duration.ofMillis(400),
+            List.of("Mechanical keyboard", "USB-C dock"));
+    var catalogPolicy = TimeoutPolicy.of(catalog.name(), 500);
+    var recommendationPolicy = TimeoutPolicy.of(recommendations.name(), 100);
     LOGGER.info("Configured per-service limits: catalog 500 ms, recommendations 100 ms");
 
-    var catalog = new ProductCatalogService(Duration.ofMillis(50));
-    var recommendations = new RecommendationService(Duration.ofMillis(400));
-
     try (var executor = new TimeoutExecutor()) {
-      LOGGER.info("Calling {}", ProductCatalogService.NAME);
-      var products = loadProducts(executor, registry, catalog);
+      LOGGER.info("Calling {}", catalog.name());
+      var products = call(executor, catalogPolicy, catalog, List.of());
       LOGGER.info("Products: {}", products);
 
-      LOGGER.info("Calling {}", RecommendationService.NAME);
-      var suggested = loadRecommendations(executor, registry, recommendations, "alice");
+      LOGGER.info("Calling {}", recommendations.name());
+      var suggested = call(executor, recommendationPolicy, recommendations, POPULAR_ITEMS);
       LOGGER.info("Recommendations shown to alice: {}", suggested);
 
       LOGGER.info("Timeouts per service: {}", executor.metrics().snapshot());
@@ -77,37 +79,19 @@ public class App {
   }
 
   /**
-   * Loads the catalog under its time limit, showing an empty catalog if the limit is exceeded.
+   * Calls a service under its time limit, answering with the fallback if the limit is exceeded.
    *
    * @param executor executor enforcing the limit
-   * @param registry registry holding the catalog's policy
-   * @param catalog the downstream catalog service
-   * @return the products, or an empty list on timeout
+   * @param policy limit that applies to the service
+   * @param service the downstream service to call
+   * @param fallback answer to use when the limit is exceeded
+   * @return the response of the service, or the fallback on timeout
    */
-  static List<String> loadProducts(
-      TimeoutExecutor executor, TimeoutRegistry registry, ProductCatalogService catalog) {
-    return executor.execute(
-        registry.policyFor(ProductCatalogService.NAME), catalog::fetchProducts, List::of);
-  }
-
-  /**
-   * Loads personalised recommendations under their time limit, showing popular items instead if the
-   * limit is exceeded.
-   *
-   * @param executor executor enforcing the limit
-   * @param registry registry holding the recommendation service's policy
-   * @param recommendations the downstream recommendation service
-   * @param customer customer to personalise for
-   * @return the recommendations, or the popular items on timeout
-   */
-  static List<String> loadRecommendations(
+  static List<String> call(
       TimeoutExecutor executor,
-      TimeoutRegistry registry,
-      RecommendationService recommendations,
-      String customer) {
-    return executor.execute(
-        registry.policyFor(RecommendationService.NAME),
-        () -> recommendations.recommendationsFor(customer),
-        () -> POPULAR_ITEMS);
+      TimeoutPolicy policy,
+      DownstreamService service,
+      List<String> fallback) {
+    return executor.execute(policy, service::fetch, () -> fallback);
   }
 }
