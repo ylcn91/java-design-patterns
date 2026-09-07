@@ -26,6 +26,7 @@ package com.iluwatar.eventcarriedstatetransfer;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -60,6 +61,13 @@ class EventBusTest {
   @Test
   void publishingWithoutSubscribersIsHarmless() {
     assertDoesNotThrow(() -> bus.publish("nobody listens"));
+  }
+
+  @Test
+  void rejectsNullEvents() {
+    var exception = assertThrows(NullPointerException.class, () -> bus.publish(null));
+
+    assertEquals("event", exception.getMessage());
   }
 
   @Test

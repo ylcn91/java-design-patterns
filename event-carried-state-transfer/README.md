@@ -57,6 +57,8 @@ sequenceDiagram
     OS->>R: apply (version 1 <= 2, ignored)
 ```
 
+![Event-Carried State Transfer class diagram](./etc/event-carried-state-transfer.urm.png)
+
 ## Programmatic Example of Event-Carried State Transfer Pattern in Java
 
 The example has a producer, a channel and a consumer. The producer is the customer service, the channel is a tiny in-memory event bus and the consumer is the order service with its local customer replica.
@@ -116,7 +118,7 @@ public CustomerState changeShippingAddress(String customerId, String newAddress)
 
 private CustomerState store(CustomerState state) {
   customers.put(state.customerId(), state);
-  var event = new CustomerUpdatedEvent(eventSequence.incrementAndGet(), Instant.now(), state);
+  var event = new CustomerUpdatedEvent(++eventSequence, Instant.now(), state);
   bus.publish(event);
   return state;
 }
@@ -166,13 +168,13 @@ public Order placeOrder(String customerId, BigDecimal amount) {
         "Amount " + amount + " exceeds credit limit " + customer.creditLimit() + " of " + customerId);
   }
   return new Order(
-      "ORD-" + orderSequence.incrementAndGet(), customerId, customer.shippingAddress(), amount);
+      "ORD-" + ++orderSequence, customerId, customer.shippingAddress(), amount);
 }
 ```
 
 6. **The demo**
 
-`App` registers a customer and changes the address, takes the customer service offline and places an order from the replica, publishes a stale event that the replica ignores, and finally shows the replica enforcing the credit limit.
+`App` registers a customer and changes the address, takes the customer service offline and places an order from the replica, publishes a stale event that the replica ignores, and shows the replica enforcing the credit limit. It then brings the customer service back and raises that limit: the new limit travels inside the event, and the order that was just rejected is accepted from the replica alone, without a single call back to the producer.
 
 ```java
 var bus = new EventBus();
@@ -188,6 +190,10 @@ var order = orderService.placeOrder("C-1", new BigDecimal("120.00")); // succeed
 
 bus.publish(new CustomerUpdatedEvent(99, Instant.now(), staleVersionOne)); // ignored
 tryToOrder(orderService, "C-1", new BigDecimal("900.00")); // rejected, above the replicated limit
+
+customerService.restart();
+customerService.changeCreditLimit("C-1", new BigDecimal("1500.00")); // the event carries the new limit
+tryToOrder(orderService, "C-1", new BigDecimal("900.00")); // accepted now, still only from the replica
 ```
 
 Program output:
@@ -217,11 +223,16 @@ INFO App -- Order service replica: C-1 version 2 at '42 Ocean Avenue, Porto' wit
 INFO App -- --- Step 4: the replica is enough to enforce business rules ---
 WARN App -- Order rejected: Amount 900.00 exceeds credit limit 500.00 of C-1
 WARN App -- Order rejected: Unknown customer C-2 in replica
+INFO App -- --- Step 5: a new credit limit travels in the event and unblocks the rejected order ---
+INFO CustomerService -- Customer service is back online
+INFO CustomerService -- Customer C-1 gets a credit limit of 1500.00
+INFO CustomerService -- Publishing event 3 with the full state of C-1 (version 3)
+INFO EventBus -- Publishing CustomerUpdatedEvent to 1 subscriber(s)
+INFO CustomerReplica -- Replica updated from event 3: C-1 is now at version 3 with address '42 Ocean Avenue, Porto' and limit 1500.00
+INFO App -- Order service replica: C-1 version 3 at '42 Ocean Avenue, Porto' with limit 1500.00
+INFO OrderService -- Accepted ORD-2 for C-1 (900.00) shipping to '42 Ocean Avenue, Porto' using replica version 3
+INFO App -- Order ORD-2 accepted
 ```
-
-## Class diagram
-
-See [event-carried-state-transfer.urm.puml](./etc/event-carried-state-transfer.urm.puml) for the PlantUML class diagram.
 
 ## When to Use the Event-Carried State Transfer Pattern in Java
 

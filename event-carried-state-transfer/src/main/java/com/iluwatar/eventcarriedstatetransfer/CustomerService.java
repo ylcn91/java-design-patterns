@@ -29,7 +29,6 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicLong;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -39,13 +38,15 @@ import lombok.extern.slf4j.Slf4j;
  * {@link CustomerUpdatedEvent} that carries the customer's complete new state. Consumers never need
  * to query this service to act on the change, which is demonstrated by taking it offline in the
  * demo while orders keep flowing.
+ *
+ * <p>Not thread-safe; the demo drives it from a single thread.
  */
 @Slf4j
 public class CustomerService {
 
   private final Map<String, CustomerState> customers = new LinkedHashMap<>();
   private final EventBus bus;
-  private final AtomicLong eventSequence = new AtomicLong();
+  private long eventSequence;
   private boolean online = true;
 
   /**
@@ -118,6 +119,12 @@ public class CustomerService {
     LOGGER.warn("Customer service is going offline");
   }
 
+  /** Ends the outage: direct queries are answered again. */
+  public void restart() {
+    online = true;
+    LOGGER.info("Customer service is back online");
+  }
+
   /** Whether direct queries are currently answered. */
   public boolean isOnline() {
     return online;
@@ -133,7 +140,7 @@ public class CustomerService {
 
   private CustomerState store(CustomerState state) {
     customers.put(state.customerId(), state);
-    var event = new CustomerUpdatedEvent(eventSequence.incrementAndGet(), Instant.now(), state);
+    var event = new CustomerUpdatedEvent(++eventSequence, Instant.now(), state);
     LOGGER.info(
         "Publishing event {} with the full state of {} (version {})",
         event.eventId(),

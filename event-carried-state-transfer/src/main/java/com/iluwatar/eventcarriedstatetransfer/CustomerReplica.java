@@ -24,7 +24,7 @@
  */
 package com.iluwatar.eventcarriedstatetransfer;
 
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
@@ -35,11 +35,13 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Because each event carries the full state, applying one is a simple upsert. The version
  * carried by the state guards against events that arrive late or twice: an event is ignored unless
  * its version is newer than what the replica already holds.
+ *
+ * <p>Not thread-safe; the demo drives it from a single thread.
  */
 @Slf4j
 public class CustomerReplica {
 
-  private final Map<String, CustomerState> customers = new HashMap<>();
+  private final Map<String, CustomerState> customers = new LinkedHashMap<>();
 
   /**
    * Applies an event to the replica.

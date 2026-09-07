@@ -92,6 +92,21 @@ class OrderServiceTest {
   }
 
   @Test
+  void acceptsOrdersOnceARaisedCreditLimitHasBeenReplicated() {
+    customerService.register("C-1", "Alice", "Lisbon", new BigDecimal("500.00"));
+    assertThrows(
+        OrderRejectedException.class,
+        () -> orderService.placeOrder("C-1", new BigDecimal("900.00")));
+
+    customerService.changeCreditLimit("C-1", new BigDecimal("1500.00"));
+
+    var order = orderService.placeOrder("C-1", new BigDecimal("900.00"));
+    assertEquals(new BigDecimal("900.00"), order.amount());
+    assertEquals(
+        new BigDecimal("1500.00"), orderService.replica().find("C-1").orElseThrow().creditLimit());
+  }
+
+  @Test
   void acceptsOrdersExactlyAtTheCreditLimitAndNumbersThemSequentially() {
     customerService.register("C-1", "Alice", "Lisbon", new BigDecimal("500.00"));
 

@@ -41,8 +41,10 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>The demo registers a customer and changes the address, showing the replica following each
  * event. It then takes the customer service offline and places an order anyway, purely from the
- * replica. A stale event is published to show that the replica ignores it, and finally an order
- * above the replicated credit limit is rejected.
+ * replica. A stale event is published to show that the replica ignores it, and an order above the
+ * replicated credit limit is rejected. Finally the customer service comes back and raises that
+ * credit limit: the new state travels in the event, and the order that was just rejected is
+ * accepted from the replica alone.
  */
 @Slf4j
 public class App {
@@ -86,6 +88,13 @@ public class App {
     LOGGER.info("--- Step 4: the replica is enough to enforce business rules ---");
     tryToOrder(orderService, "C-1", new BigDecimal("900.00"));
     tryToOrder(orderService, "C-2", new BigDecimal("10.00"));
+
+    LOGGER.info(
+        "--- Step 5: a new credit limit travels in the event and unblocks the rejected order ---");
+    customerService.restart();
+    customerService.changeCreditLimit("C-1", new BigDecimal("1500.00"));
+    logReplica(orderService, "C-1");
+    tryToOrder(orderService, "C-1", new BigDecimal("900.00"));
   }
 
   /**

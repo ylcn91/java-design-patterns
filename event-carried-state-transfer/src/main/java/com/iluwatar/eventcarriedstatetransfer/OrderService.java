@@ -25,7 +25,6 @@
 package com.iluwatar.eventcarriedstatetransfer;
 
 import java.math.BigDecimal;
-import java.util.concurrent.atomic.AtomicLong;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -34,12 +33,14 @@ import lombok.extern.slf4j.Slf4j;
  * <p>The order service subscribes its {@link CustomerReplica} to customer events and afterwards
  * answers every order using only that replica. It has no reference to the customer service at all,
  * so it keeps working while the customer service is down and it never adds load to it.
+ *
+ * <p>Not thread-safe; the demo drives it from a single thread.
  */
 @Slf4j
 public class OrderService {
 
   private final CustomerReplica replica = new CustomerReplica();
-  private final AtomicLong orderSequence = new AtomicLong();
+  private long orderSequence;
 
   /**
    * Creates the service and subscribes its replica to customer events.
@@ -74,12 +75,7 @@ public class OrderService {
               + " of "
               + customerId);
     }
-    var order =
-        new Order(
-            "ORD-" + orderSequence.incrementAndGet(),
-            customerId,
-            customer.shippingAddress(),
-            amount);
+    var order = new Order("ORD-" + ++orderSequence, customerId, customer.shippingAddress(), amount);
     LOGGER.info(
         "Accepted {} for {} ({}) shipping to '{}' using replica version {}",
         order.orderId(),

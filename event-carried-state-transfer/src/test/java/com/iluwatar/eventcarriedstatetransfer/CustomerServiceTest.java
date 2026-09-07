@@ -100,4 +100,15 @@ class CustomerServiceTest {
     var thrown = assertThrows(IllegalStateException.class, () -> service.findCustomer("C-1"));
     assertEquals("customer service is offline", thrown.getMessage());
   }
+
+  @Test
+  void answersDirectLookupsAgainAfterARestart() {
+    service.register("C-1", "Alice", "Lisbon", new BigDecimal("500.00"));
+    service.shutdown();
+
+    service.restart();
+
+    assertTrue(service.isOnline());
+    assertEquals("Alice", service.findCustomer("C-1").orElseThrow().name());
+  }
 }

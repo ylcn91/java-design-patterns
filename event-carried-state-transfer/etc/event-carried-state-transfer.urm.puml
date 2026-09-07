@@ -36,7 +36,7 @@ package com.iluwatar.eventcarriedstatetransfer {
   class CustomerService {
     - customers : Map<String, CustomerState>
     - bus : EventBus
-    - eventSequence : AtomicLong
+    - eventSequence : long
     - online : boolean
     + CustomerService(bus : EventBus)
     + register(customerId : String, name : String, shippingAddress : String, creditLimit : BigDecimal) : CustomerState
@@ -44,6 +44,7 @@ package com.iluwatar.eventcarriedstatetransfer {
     + changeCreditLimit(customerId : String, newLimit : BigDecimal) : CustomerState
     + findCustomer(customerId : String) : Optional<CustomerState>
     + shutdown() : void
+    + restart() : void
     + isOnline() : boolean
   }
   class CustomerReplica {
@@ -55,7 +56,7 @@ package com.iluwatar.eventcarriedstatetransfer {
   }
   class OrderService {
     - replica : CustomerReplica
-    - orderSequence : AtomicLong
+    - orderSequence : long
     + OrderService(bus : EventBus)
     + placeOrder(customerId : String, amount : BigDecimal) : Order
     + replica() : CustomerReplica
@@ -86,8 +87,8 @@ CustomerService --> "*" CustomerState
 CustomerService ..> CustomerUpdatedEvent : publishes
 CustomerReplica --> "*" CustomerState
 CustomerReplica ..> CustomerUpdatedEvent : applies
-CustomerReplica ..|> EventListener
 OrderService --> CustomerReplica
+OrderService ..> EventListener : adapts the replica
 OrderService ..> EventBus : subscribes
 OrderService ..> Order : creates
 OrderService ..> OrderRejectedException : throws

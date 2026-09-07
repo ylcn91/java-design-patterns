@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -45,6 +46,9 @@ public class EventBus {
   /**
    * Registers a listener for events of the given class.
    *
+   * <p>Dispatch is by exact runtime class, so the listener receives only events whose class is
+   * exactly {@code eventType}, never those of a subclass.
+   *
    * @param eventType the class of events to receive
    * @param listener the listener to notify
    * @param <E> the event type
@@ -58,9 +62,14 @@ public class EventBus {
   /**
    * Delivers the event to every listener subscribed to its class.
    *
+   * <p>Only listeners subscribed to the event's exact runtime class are notified; a listener
+   * subscribed to a supertype of the event does not receive it.
+   *
    * @param event the event to publish
+   * @throws NullPointerException if the event is {@code null}
    */
   public void publish(Object event) {
+    Objects.requireNonNull(event, "event");
     var subscribers = listeners.getOrDefault(event.getClass(), List.of());
     if (subscribers.isEmpty()) {
       LOGGER.warn("No subscribers for {}", event.getClass().getSimpleName());
