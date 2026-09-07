@@ -100,6 +100,20 @@ class LoadShedderTest {
   }
 
   @Test
+  void unmatchedReleaseDoesNotDriveInFlightNegative() {
+    shedder.release();
+    assertEquals(0, shedder.getInFlight());
+    fill(CAPACITY);
+    assertThrows(LoadShedException.class, () -> shedder.acquire(request(Priority.CRITICAL)));
+  }
+
+  @Test
+  void acquireReturnsInFlightCountIncludingTheAdmittedRequest() {
+    assertEquals(1, shedder.acquire(request(Priority.NORMAL)));
+    assertEquals(2, shedder.acquire(request(Priority.NORMAL)));
+  }
+
+  @Test
   void countsShedRequestsPerPriority() {
     fill(CAPACITY);
     assertThrows(LoadShedException.class, () -> shedder.acquire(request(Priority.LOW)));

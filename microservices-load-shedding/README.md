@@ -49,6 +49,8 @@ flowchart TD
     G --> H[REJECTED response<br/>fail fast, retry later]
 ```
 
+![Load Shedding class diagram](./etc/microservices-load-shedding.urm.png)
+
 ## Programmatic Example of Load Shedding Pattern in Java
 
 Our example is an order service that can process five requests at the same time. When a slow payment provider makes orders pile up inside the service, new requests are shed according to their priority: best-effort work is dropped first, regular traffic is dropped when the service is almost full, and one slot is always kept free for critical requests such as checkout.
@@ -87,7 +89,7 @@ public class LoadShedder {
     }
   }
 
-  public void acquire(Request request) {
+  public int acquire(Request request) {
     var priority = request.priority();
     var limit = limits.get(priority);
     // The accumulator is a pure function, so it is safe for the atomic to re-apply it under
@@ -101,10 +103,12 @@ public class LoadShedder {
       throw new LoadShedException(request, previous, limit);
     }
     accepted.increment();
+    return previous + 1;
   }
 
   public void release() {
-    inFlight.decrementAndGet();
+    // Clamped at zero so that an unmatched release cannot hand out capacity the service lacks.
+    inFlight.updateAndGet(current -> Math.max(0, current - 1));
   }
 }
 ```
@@ -120,14 +124,17 @@ public class ShedGuardedService {
   private final RequestHandler handler;
 
   public Response handle(Request request) {
+    int inFlight;
     try {
-      shedder.acquire(request);
+      // The count is taken from the admission itself: reading it back afterwards could report a
+      // value that belongs to a concurrent request.
+      inFlight = shedder.acquire(request);
     } catch (LoadShedException e) {
       LOGGER.warn("[{}] shed {} ({}): {}", name, request.id(), request.priority(), e.getMessage());
       return Response.rejected(request, e.getMessage());
     }
     LOGGER.info("[{}] admitted {} ({}), {}/{} in flight", name, request.id(), request.priority(),
-        shedder.getInFlight(), shedder.getMaxInFlight());
+        inFlight, shedder.getMaxInFlight());
     try {
       return Response.accepted(request, handler.handle(request));
     } finally {
@@ -172,16 +179,14 @@ p2 -> REJECTED: Request p2 shed: 4 requests in flight, limit for NORMAL priority
 [order-service] admitted p3 (CRITICAL), 5/5 in flight
 --- Phase 3: payment provider recovers, load drops ---
 order-1 -> ACCEPTED: processed place order
-...
+order-2 -> ACCEPTED: processed place order
+order-3 -> ACCEPTED: processed place order
+order-4 -> ACCEPTED: processed place order
 p3 -> ACCEPTED: processed checkout payment
 [order-service] admitted r3 (LOW), 1/5 in flight
 r3 -> ACCEPTED: processed prefetch recommendations
-Summary: accepted=8, shed low=1, shed normal=1, shed critical=0
+Summary: accepted=8, shed 2 requests in total: low=1, normal=1, critical=0
 ```
-
-## Class diagram
-
-See [microservices-load-shedding.urm.puml](./etc/microservices-load-shedding.urm.puml) for the PlantUML class diagram.
 
 ## When to Use the Load Shedding Pattern in Java
 

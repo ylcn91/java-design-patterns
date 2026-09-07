@@ -59,8 +59,11 @@ public class ShedGuardedService {
    * @return the handler result, or a rejection when the request was shed
    */
   public Response handle(Request request) {
+    int inFlight;
     try {
-      shedder.acquire(request);
+      // The count is taken from the admission itself: reading it back afterwards could report a
+      // value that belongs to a concurrent request.
+      inFlight = shedder.acquire(request);
     } catch (LoadShedException e) {
       LOGGER.warn("[{}] shed {} ({}): {}", name, request.id(), request.priority(), e.getMessage());
       return Response.rejected(request, e.getMessage());
@@ -70,7 +73,7 @@ public class ShedGuardedService {
         name,
         request.id(),
         request.priority(),
-        shedder.getInFlight(),
+        inFlight,
         shedder.getMaxInFlight());
     try {
       return Response.accepted(request, handler.handle(request));

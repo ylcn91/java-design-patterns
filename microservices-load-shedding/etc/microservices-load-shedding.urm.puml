@@ -41,7 +41,7 @@ package com.iluwatar.loadshedding {
     - accepted : LongAdder
     - shed : Map<Priority, LongAdder>
     + LoadShedder(maxInFlight : int, lowPriorityLimit : int, criticalReserve : int)
-    + acquire(request : Request) : void
+    + acquire(request : Request) : int
     + release() : void
     + getMaxInFlight() : int
     + getInFlight() : int

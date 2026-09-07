@@ -125,8 +125,9 @@ public class App {
       report(orderService.handle(new Request("r3", Priority.LOW, "prefetch recommendations")));
 
       LOGGER.info(
-          "Summary: accepted={}, shed low={}, shed normal={}, shed critical={}",
+          "Summary: accepted={}, shed {} requests in total: low={}, normal={}, critical={}",
           shedder.getAccepted(),
+          shedder.getTotalShed(),
           shedder.getShed(Priority.LOW),
           shedder.getShed(Priority.NORMAL),
           shedder.getShed(Priority.CRITICAL));

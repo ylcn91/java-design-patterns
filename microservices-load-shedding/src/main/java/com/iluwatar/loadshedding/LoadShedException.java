@@ -34,6 +34,8 @@ import lombok.Getter;
 @Getter
 public class LoadShedException extends RuntimeException {
 
+  private static final long serialVersionUID = 1L;
+
   private final String requestId;
   private final Priority priority;
 

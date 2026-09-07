@@ -90,9 +90,10 @@ public class LoadShedder {
    * invoke {@link #release()} once the work is done.
    *
    * @param request the request asking for admission
+   * @return the in-flight count including this request, as observed at the moment of admission
    * @throws LoadShedException if the service has no spare capacity for this priority
    */
-  public void acquire(Request request) {
+  public int acquire(Request request) {
     var priority = request.priority();
     var limit = limits.get(priority);
     // The accumulator is a pure function, so it is safe for the atomic to re-apply it under
@@ -106,11 +107,16 @@ public class LoadShedder {
       throw new LoadShedException(request, previous, limit);
     }
     accepted.increment();
+    return previous + 1;
   }
 
-  /** Signals that a previously admitted request has finished, freeing one slot of capacity. */
+  /**
+   * Signals that a previously admitted request has finished, freeing one slot of capacity. The
+   * count is clamped at zero so that an unmatched release cannot make it negative and hand out more
+   * capacity than the service has.
+   */
   public void release() {
-    inFlight.decrementAndGet();
+    inFlight.updateAndGet(current -> Math.max(0, current - 1));
   }
 
   /** Hard capacity of the service. */
