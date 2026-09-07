@@ -65,6 +65,8 @@ sequenceDiagram
     ScatterGather->>Client: aggregate() returns Harbor Stays 295.50
 ```
 
+![Scatter-Gather class diagram](./etc/scatter-gather.urm.png)
+
 ## Programmatic Example of Scatter-Gather Pattern in Java
 
 The request is a plain immutable value. Every recipient receives exactly the same instance.
@@ -89,10 +91,10 @@ The `Aggregator` reduces the gathered replies. Because it is a separate strategy
 
 ```java
 @FunctionalInterface
-public interface Aggregator<T, R> {
-  R aggregate(List<T> replies);
+public interface Aggregator<R> {
+  R aggregate(List<RateQuote> replies);
 
-  static Aggregator<RateQuote, Optional<RateQuote>> cheapestQuote() {
+  static Aggregator<Optional<RateQuote>> cheapestQuote() {
     return replies -> replies.stream().min(Comparator.comparing(RateQuote::total));
   }
 }
@@ -104,9 +106,21 @@ public interface Aggregator<T, R> {
 public List<PendingReply> scatter(RateRequest request, List<RateProvider> providers) {
   var pending = new ArrayList<PendingReply>();
   for (var provider : providers) {
-    var reply =
-        CompletableFuture.supplyAsync(() -> provider.quote(request), executor)
-            .orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS);
+    var reply = new CompletableFuture<RateQuote>();
+    var task = executor.submit(() -> {
+      try {
+        reply.complete(provider.quote(request));
+      } catch (RuntimeException e) {
+        reply.completeExceptionally(e);
+      }
+    });
+    // a reply that times out or is cancelled also cancels its task, interrupting the provider call
+    reply.orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS)
+        .whenComplete((quote, failure) -> {
+          if (failure != null && !task.isDone()) {
+            task.cancel(true);
+          }
+        });
     pending.add(new PendingReply(provider, reply));
   }
   return pending;
@@ -140,7 +154,7 @@ A convenience method chains the phases together.
 
 ```java
 public <R> R scatterGather(
-    RateRequest request, List<RateProvider> providers, Aggregator<RateQuote, R> aggregator) {
+    RateRequest request, List<RateProvider> providers, Aggregator<R> aggregator) {
   return aggregator.aggregate(gather(scatter(request, providers)));
 }
 ```
@@ -194,10 +208,6 @@ Aggregate phase: choosing the cheapest of 2 quotes
 Best offer: Harbor Stays at 295.50
 ```
 
-## Class diagram
-
-See [scatter-gather.urm.puml](./etc/scatter-gather.urm.puml) for the PlantUML class diagram.
-
 ## When to Use the Scatter-Gather Pattern in Java
 
 * The same question has to be answered by several independent services, such as price comparison, search federation, or quorum reads.
@@ -225,7 +235,7 @@ Benefits:
 Trade-offs:
 
 * **Partial results**: the caller must be able to live with an answer built from a subset of recipients, and the aggregator must handle an empty set.
-* **Resource usage**: every request occupies one thread or connection per recipient; a dropped reply may still be computed by the recipient.
+* **Resource usage**: every request occupies one thread or connection per recipient; dropping a reply interrupts the local call, but a remote recipient may still finish computing an answer nobody reads.
 * **Tuning**: the timeout is a compromise between completeness and responsiveness and usually needs measurement to get right.
 
 ## Related Java Design Patterns
@@ -234,7 +244,7 @@ Trade-offs:
 * [Microservices Aggregator](../microservices-aggregrator): a service that composes the responses of several downstream services; Scatter-Gather is a way to fetch those responses concurrently.
 * [Async Method Invocation](../async-method-invocation): the mechanism used to call each recipient without blocking the caller.
 * [Promise](../promise): each pending reply is a promise that either completes with a quote or fails.
-* Timeout: bounds how long the gather phase waits for each recipient.
+* Timeout: bounds how long after the scatter each reply has to arrive; the timer starts when the request is scattered, not when gather is called.
 
 ## References and Credits
 

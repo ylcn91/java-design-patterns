@@ -35,9 +35,9 @@ package com.iluwatar.scattergather {
     + name() : String
     + quote(request : RateRequest) : RateQuote
   }
-  interface Aggregator<T, R> {
-    + aggregate(replies : List<T>) : R {abstract}
-    + cheapestQuote() : Aggregator<RateQuote, Optional<RateQuote>> {static}
+  interface Aggregator<R> {
+    + aggregate(replies : List<RateQuote>) : R {abstract}
+    + cheapestQuote() : Aggregator<Optional<RateQuote>> {static}
   }
   class PendingReply {
     + PendingReply(provider : RateProvider, reply : CompletableFuture<RateQuote>)
@@ -47,10 +47,12 @@ package com.iluwatar.scattergather {
   class ScatterGather {
     - executor : ExecutorService
     - timeout : Duration
+    - shutdownGrace : Duration
     + ScatterGather(executor : ExecutorService, timeout : Duration)
+    ~ ScatterGather(executor : ExecutorService, timeout : Duration, shutdownGrace : Duration)
     + scatter(request : RateRequest, providers : List<RateProvider>) : List<PendingReply>
     + gather(pending : List<PendingReply>) : List<RateQuote>
-    + scatterGather(request : RateRequest, providers : List<RateProvider>, aggregator : Aggregator<RateQuote, R>) : R
+    + scatterGather(request : RateRequest, providers : List<RateProvider>, aggregator : Aggregator<R>) : R
     + close() : void
   }
   class App {
@@ -67,8 +69,8 @@ RateProvider ..> RateRequest
 RateProvider ..> RateQuote
 PendingReply --> RateProvider
 PendingReply ..> RateQuote
-ScatterGather ..> PendingReply
+ScatterGather +-- PendingReply
 ScatterGather ..> Aggregator
-ScatterGather --> "*" RateProvider
+ScatterGather ..> RateProvider
 App ..> ScatterGather
 @enduml

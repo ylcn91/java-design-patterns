@@ -27,6 +27,7 @@ package com.iluwatar.scattergather;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
@@ -41,7 +42,9 @@ import lombok.extern.slf4j.Slf4j;
  *   <li><b>Scatter</b>: the same request is sent to every provider concurrently.
  *   <li><b>Gather</b>: replies are collected until each one has either arrived, failed, or exceeded
  *       the timeout. Late and failed replies are logged and dropped so a single slow provider
- *       cannot hold up the whole answer.
+ *       cannot hold up the whole answer. Dropping a reply also cancels the provider call, so a
+ *       timed-out provider is interrupted and its pool thread is freed instead of staying busy with
+ *       work nobody will read.
  *   <li><b>Aggregate</b>: the gathered replies are reduced by an {@link Aggregator}.
  * </ol>
  *
@@ -58,18 +61,35 @@ public class ScatterGather implements AutoCloseable {
    */
   public record PendingReply(RateProvider provider, CompletableFuture<RateQuote> reply) {}
 
+  private static final Duration DEFAULT_SHUTDOWN_GRACE = Duration.ofSeconds(1);
+
   private final ExecutorService executor;
   private final Duration timeout;
+  private final Duration shutdownGrace;
 
   /**
-   * Creates a coordinator.
+   * Creates a coordinator that gives the executor one second to terminate on {@link #close()}.
    *
    * @param executor runs the calls to the providers; it is shut down when this object is closed
-   * @param timeout how long the gather phase waits for each reply
+   * @param timeout how long after the scatter each reply has to arrive; the timer starts when the
+   *     request is scattered, not when gather is called
    */
   public ScatterGather(ExecutorService executor, Duration timeout) {
+    this(executor, timeout, DEFAULT_SHUTDOWN_GRACE);
+  }
+
+  /**
+   * Creates a coordinator with an explicit shutdown grace period, so tests that close a coordinator
+   * whose task ignores interrupts do not have to wait out the default one.
+   *
+   * @param executor runs the calls to the providers; it is shut down when this object is closed
+   * @param timeout how long after the scatter each reply has to arrive
+   * @param shutdownGrace how long {@link #close()} waits for the executor to terminate
+   */
+  ScatterGather(ExecutorService executor, Duration timeout, Duration shutdownGrace) {
     this.executor = executor;
     this.timeout = timeout;
+    this.shutdownGrace = shutdownGrace;
   }
 
   /**
@@ -87,9 +107,26 @@ public class ScatterGather implements AutoCloseable {
         providers.size());
     var pending = new ArrayList<PendingReply>();
     for (var provider : providers) {
-      var reply =
-          CompletableFuture.supplyAsync(() -> provider.quote(request), executor)
-              .orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS);
+      var reply = new CompletableFuture<RateQuote>();
+      var task =
+          executor.submit(
+              () -> {
+                try {
+                  reply.complete(provider.quote(request));
+                } catch (RuntimeException e) {
+                  reply.completeExceptionally(e);
+                }
+              });
+      // A reply that times out or is cancelled also cancels its task, interrupting the provider
+      // call so that the pool thread is handed back instead of finishing work nobody will read.
+      reply
+          .orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS)
+          .whenComplete(
+              (quote, failure) -> {
+                if (failure != null && !task.isDone()) {
+                  task.cancel(true);
+                }
+              });
       pending.add(new PendingReply(provider, reply));
     }
     return pending;
@@ -119,6 +156,8 @@ public class ScatterGather implements AutoCloseable {
         } else {
           LOGGER.warn("Dropping {}: {}", entry.provider().name(), e.getCause().getMessage());
         }
+      } catch (CancellationException e) {
+        LOGGER.warn("Dropping {}: the reply was cancelled", entry.provider().name());
       }
     }
     LOGGER.info("Gathered {} of {} replies", quotes.size(), pending.size());
@@ -135,7 +174,7 @@ public class ScatterGather implements AutoCloseable {
    * @return the aggregated result
    */
   public <R> R scatterGather(
-      RateRequest request, List<RateProvider> providers, Aggregator<RateQuote, R> aggregator) {
+      RateRequest request, List<RateProvider> providers, Aggregator<R> aggregator) {
     return aggregator.aggregate(gather(scatter(request, providers)));
   }
 
@@ -144,8 +183,8 @@ public class ScatterGather implements AutoCloseable {
   public void close() {
     executor.shutdownNow();
     try {
-      if (!executor.awaitTermination(1, TimeUnit.SECONDS)) {
-        LOGGER.warn("Executor did not terminate within one second");
+      if (!executor.awaitTermination(shutdownGrace.toMillis(), TimeUnit.MILLISECONDS)) {
+        LOGGER.warn("Executor did not terminate within {} ms", shutdownGrace.toMillis());
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();

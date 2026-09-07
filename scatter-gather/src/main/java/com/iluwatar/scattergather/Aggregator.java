@@ -33,11 +33,10 @@ import java.util.Optional;
  * same scatter and gather machinery can serve callers that want the cheapest quote, the average
  * price, or the full list.
  *
- * @param <T> the type of the gathered replies
  * @param <R> the type of the aggregated result
  */
 @FunctionalInterface
-public interface Aggregator<T, R> {
+public interface Aggregator<R> {
 
   /**
    * Combines the gathered replies.
@@ -45,10 +44,10 @@ public interface Aggregator<T, R> {
    * @param replies the replies that arrived in time, possibly empty
    * @return the aggregated result
    */
-  R aggregate(List<T> replies);
+  R aggregate(List<RateQuote> replies);
 
   /** Returns an aggregator that picks the quote with the lowest total price. */
-  static Aggregator<RateQuote, Optional<RateQuote>> cheapestQuote() {
+  static Aggregator<Optional<RateQuote>> cheapestQuote() {
     return replies -> replies.stream().min(Comparator.comparing(RateQuote::total));
   }
 }

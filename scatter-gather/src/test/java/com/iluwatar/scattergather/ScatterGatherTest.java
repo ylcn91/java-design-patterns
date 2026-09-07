@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,6 +44,7 @@ class ScatterGatherTest {
 
   private static final RateRequest REQUEST = new RateRequest("Porto", LocalDate.of(2026, 5, 1), 2);
   private static final Duration TIMEOUT = Duration.ofMillis(300);
+  private static final Duration SHORT_SHUTDOWN_GRACE = Duration.ofMillis(50);
 
   private final CountDownLatch gate = new CountDownLatch(1);
   private ExecutorService executor;
@@ -81,10 +83,54 @@ class ScatterGatherTest {
   }
 
   @Test
+  void shouldInterruptProviderThatMissesTheTimeoutAndFreeItsThread() throws Exception {
+    var interrupted = new CountDownLatch(1);
+    var slow =
+        new RateProvider() {
+          @Override
+          public String name() {
+            return "slow";
+          }
+
+          @Override
+          public RateQuote quote(RateRequest request) {
+            try {
+              gate.await();
+            } catch (InterruptedException e) {
+              interrupted.countDown();
+              Thread.currentThread().interrupt();
+              throw new IllegalStateException("interrupted", e);
+            }
+            return new RateQuote(name(), BigDecimal.ONE);
+          }
+        };
+    var ownExecutor = Executors.newSingleThreadExecutor();
+    try (var subject = new ScatterGather(ownExecutor, TIMEOUT)) {
+      assertTrue(subject.gather(subject.scatter(REQUEST, List.of(slow))).isEmpty());
+
+      assertTrue(interrupted.await(1, TimeUnit.SECONDS), "timed-out provider was not interrupted");
+      // the only pool thread is free again, so a fresh call answers well within the timeout
+      var quotes = subject.gather(subject.scatter(REQUEST, List.of(provider("fast", "100.00"))));
+      assertEquals(List.of(new RateQuote("fast", new BigDecimal("200.00"))), quotes);
+    }
+  }
+
+  @Test
   void shouldDropProviderThatFails() {
     var providers = List.<RateProvider>of(new FailingRateProvider("down"), provider("up", "50.00"));
 
     var quotes = scatterGather.gather(scatterGather.scatter(REQUEST, providers));
+
+    assertEquals(List.of(new RateQuote("up", new BigDecimal("100.00"))), quotes);
+  }
+
+  @Test
+  void shouldDropProviderWhoseReplyWasCancelled() {
+    var providers = List.<RateProvider>of(blockedProvider("stuck"), provider("up", "50.00"));
+    var pending = scatterGather.scatter(REQUEST, providers);
+    pending.get(0).reply().cancel(true);
+
+    var quotes = scatterGather.gather(pending);
 
     assertEquals(List.of(new RateQuote("up", new BigDecimal("100.00"))), quotes);
   }
@@ -144,7 +190,7 @@ class ScatterGatherTest {
   void shouldReturnFromCloseWhenTaskIgnoresInterrupts() {
     var stubborn = new CountDownLatch(1);
     var ownExecutor = Executors.newSingleThreadExecutor();
-    var subject = new ScatterGather(ownExecutor, Duration.ofSeconds(10));
+    var subject = new ScatterGather(ownExecutor, Duration.ofSeconds(10), SHORT_SHUTDOWN_GRACE);
     subject.scatter(REQUEST, List.of(interruptIgnoringProvider("stubborn", stubborn)));
     try {
       subject.close();
