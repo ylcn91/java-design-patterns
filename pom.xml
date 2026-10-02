@@ -261,6 +261,8 @@
     <module>fallback</module>
     <module>onion-architecture</module>
     <module>scatter-gather</module>
+    <module>microservices-bulkhead</module>
+    <module>microservices-load-shedding</module>
   </modules>
   <repositories>
     <repository>
